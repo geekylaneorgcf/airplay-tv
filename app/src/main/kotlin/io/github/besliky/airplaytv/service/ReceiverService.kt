@@ -195,8 +195,8 @@ class ReceiverService : Service(), NativeBridge.Listener {
         releaseMulticastLock()
         Notifications.cancelSessionPrompt(this)
         ReceiverState.update {
-            it.copy(status = Status.OFF, clientName = null, clientModel = null, videoActive = false,
-                audioActive = false, pin = null, port = 0)
+            it.copy(status = Status.OFF, publishedName = "", clientName = null, clientModel = null,
+                videoActive = false, audioActive = false, pin = null, port = 0)
         }
     }
 

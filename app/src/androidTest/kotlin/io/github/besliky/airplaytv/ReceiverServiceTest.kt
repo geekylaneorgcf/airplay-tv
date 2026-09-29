@@ -1,11 +1,16 @@
 package io.github.besliky.airplaytv
 
+import android.content.Context
+import android.net.nsd.NsdManager
+import android.net.nsd.NsdServiceInfo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.besliky.airplaytv.core.NativeBridge
+import io.github.besliky.airplaytv.service.Advertiser
 import io.github.besliky.airplaytv.service.ReceiverService
 import io.github.besliky.airplaytv.service.ReceiverState
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -13,6 +18,8 @@ import org.junit.runner.RunWith
 import java.io.ByteArrayOutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
  * Starts the real foreground service and talks RTSP to the native receiver over
@@ -30,6 +37,16 @@ class ReceiverServiceTest {
             Thread.sleep(100)
         }
         return ReceiverState.current.port
+    }
+
+    private fun waitForPublishedName(timeoutMs: Long, condition: (String) -> Boolean): String {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            val name = ReceiverState.current.publishedName
+            if (condition(name)) return name
+            Thread.sleep(100)
+        }
+        return ReceiverState.current.publishedName
     }
 
     private fun rtsp(port: Int, request: String): Pair<String, ByteArray> {
@@ -103,5 +120,51 @@ class ReceiverServiceTest {
         val (head, _) = rtsp(port, "OPTIONS * RTSP/1.0\r\nCSeq: 5\r\n\r\n")
         assertTrue(head, head.startsWith("RTSP/1.0 200 OK"))
         assertTrue(head.contains("Public: SETUP"))
+    }
+
+    @Test
+    fun takenNameIsReclaimedOnceItIsFree() {
+        val settings = Settings(context)
+        val originalName = settings.deviceName
+        val name = "Name Test ${(1000..9999).random()}"
+        val nsd = context.getSystemService(Context.NSD_SERVICE) as NsdManager
+        val registered = CountDownLatch(1)
+        val unregistered = CountDownLatch(1)
+        val other = object : NsdManager.RegistrationListener {
+            override fun onServiceRegistered(info: NsdServiceInfo) = registered.countDown()
+            override fun onRegistrationFailed(info: NsdServiceInfo, errorCode: Int) = Unit
+            override fun onServiceUnregistered(info: NsdServiceInfo) = unregistered.countDown()
+            override fun onUnregistrationFailed(info: NsdServiceInfo, errorCode: Int) = unregistered.countDown()
+        }
+        var otherActive = false
+        try {
+            settings.enabled = true
+            ReceiverService.start(context)
+            assertTrue(waitForPort() > 0)
+
+            // Another receiver already uses the name when this one is renamed to it.
+            val info = NsdServiceInfo().apply {
+                serviceName = name
+                serviceType = Advertiser.AIRPLAY_TYPE
+                port = 7999
+            }
+            nsd.registerService(info, NsdManager.PROTOCOL_DNS_SD, other)
+            otherActive = true
+            assertTrue("conflicting service was not registered", registered.await(10, TimeUnit.SECONDS))
+            settings.deviceName = name
+
+            val substitute = waitForPublishedName(20_000) { it.startsWith(name) }
+            assertTrue("published as \"$substitute\"", substitute.startsWith(name))
+            assertNotEquals(name, substitute)
+
+            // Once the name is free again, the receiver takes it back.
+            nsd.unregisterService(other)
+            otherActive = false
+            unregistered.await(10, TimeUnit.SECONDS)
+            assertEquals(name, waitForPublishedName(40_000) { it == name })
+        } finally {
+            if (otherActive) nsd.unregisterService(other)
+            settings.deviceName = originalName
+        }
     }
 }

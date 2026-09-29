@@ -10,7 +10,7 @@ First release.
   decoder configuration, newest-frame rendering, decoder kept alive in the background
 - Audio: AAC-ELD while mirroring, ALAC and AAC-LC for music, sender volume control
 - Bonjour discovery through Android's mDNS responder, re-announced on network
-  changes and wake-up
+  changes and wake-up, with duplicate device names resolved automatically
 - Background receiver: foreground service, start on boot, recovery after process
   death and app updates, automatic opening of the playback screen
 - Optional PIN pairing with remembered devices and pairing reset

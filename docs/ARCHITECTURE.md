@@ -122,8 +122,11 @@ mirror socket ─▶ payload buffer ─▶ AES-CTR (in place) ─▶ AVCC→Anne
   re-announces the services after the TV wakes.
 - **Discovery** uses `NsdManager`, i.e. the platform's mDNS responder, so there
   is no second responder competing for port 5353. Registrations are serialized so
-  the same name is never published twice. A multicast lock is held while the
-  receiver runs.
+  the same name is never published twice. If another device already uses the
+  name, the responder publishes a substitute ("Name (2)"), which the UI shows; the
+  configured name is tried once more after ten seconds, since the conflict is
+  often with this TV's own records still cached on the network. A multicast lock
+  is held while the receiver runs.
 - **Sessions** acquire a partial wake lock and a low-latency Wi-Fi lock, released
   as soon as the session ends. Decoders, audio output and their threads exist only
   during a session.

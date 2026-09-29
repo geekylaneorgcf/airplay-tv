@@ -8,7 +8,7 @@
 | `core/tests` loopback tests | complete sessions against the real server over sockets: legacy pairing, no pairing, PIN pairing (right and wrong PIN, remembered sender), sender takeover, receiver-side disconnect, sender vanishing, PIN hidden when the sender leaves, hostile and half-open connections, encrypted mirror and audio streams compared byte for byte | same |
 | fuzzers | `bplist`, `rtsp`, `mirror`, `alac` and the complete request handler (`server`) with libFuzzer | CI, 60 s per target per run |
 | JVM unit tests | name sanitising, settings keys, key validation, hex helpers | CI |
-| instrumentation tests | the real foreground service answering RTSP over loopback, TXT records, malformed traffic | Android TV emulator |
+| instrumentation tests | the real foreground service answering RTSP over loopback, TXT records, malformed traffic, a device name already taken on the network (substitute name, name taken back once free) | Android TV emulator |
 | lint | Android lint on the release variant, no issues allowed to accumulate | CI |
 
 Run the native tests on a device or emulator without a Linux machine:

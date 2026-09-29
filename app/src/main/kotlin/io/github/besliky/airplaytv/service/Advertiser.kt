@@ -15,8 +15,10 @@ import io.github.besliky.airplaytv.Log.Category.DISCOVERY
  *
  * Registration and unregistration are asynchronous. To never publish the same name
  * twice (which would make the system rename it to "Name (2)"), a new registration is
- * only started after the previous one has been confirmed as removed. All methods
- * must be called on the main thread.
+ * only started after the previous one has been confirmed as removed. If the name is
+ * already taken on the network, the system picks a new one; the configured name is
+ * tried once more later, because the conflict is often with records of this device
+ * that are still cached on the network. All methods must be called on the main thread.
  */
 class Advertiser(context: Context) {
 
@@ -40,6 +42,8 @@ class Advertiser(context: Context) {
     private val listeners = mutableListOf<NsdManager.RegistrationListener>()
     private var pending = 0
     private var failed = false
+    private var renamed = false
+    private var renameRetried = false
     private var generation = 0
     private var retryDelayMs = RETRY_MIN_MS
     private var retryAt = 0L
@@ -53,6 +57,7 @@ class Advertiser(context: Context) {
         if (registration != desired) {
             retryAt = 0L
             retryDelayMs = RETRY_MIN_MS
+            renameRetried = false
         }
         desired = registration
         sync()
@@ -69,6 +74,7 @@ class Advertiser(context: Context) {
         if (desired != null) {
             forceRefresh = true
             retryAt = 0L
+            renameRetried = false
             sync()
         }
     }
@@ -98,6 +104,7 @@ class Advertiser(context: Context) {
         active = reg
         pending = 2
         failed = false
+        renamed = false
         val gen = ++generation
         listeners.clear()
         register(gen, reg.airplayName, AIRPLAY_TYPE, reg.port, reg.airplayTxt)
@@ -109,7 +116,7 @@ class Advertiser(context: Context) {
                 pending = 0
                 registrationFinished()
             }
-        }, TIMEOUT_MS)
+        }, REGISTER_TIMEOUT_MS)
     }
 
     private fun register(gen: Int, name: String, type: String, port: Int, txt: Map<String, String>) {
@@ -129,8 +136,10 @@ class Advertiser(context: Context) {
             override fun onServiceRegistered(serviceInfo: NsdServiceInfo) {
                 handler.post {
                     if (gen != generation || state != State.REGISTERING) return@post
-                    Log.i(DISCOVERY, "published $type as \"${serviceInfo.serviceName}\"")
-                    if (type == AIRPLAY_TYPE) onPublished?.invoke(serviceInfo.serviceName ?: name)
+                    val published = serviceInfo.serviceName ?: name
+                    Log.i(DISCOVERY, "published $type as \"$published\"")
+                    if (published != name) renamed = true
+                    if (type == AIRPLAY_TYPE) onPublished?.invoke(published)
                     if (--pending == 0) registrationFinished()
                 }
             }
@@ -180,6 +189,17 @@ class Advertiser(context: Context) {
             unregisterAll()
         } else {
             retryDelayMs = RETRY_MIN_MS
+            if (renamed && !renameRetried) {
+                renameRetried = true
+                Log.i(DISCOVERY, "name already in use, trying the configured name again later")
+                val gen = generation
+                handler.postDelayed({
+                    if (generation == gen && state == State.REGISTERED) {
+                        forceRefresh = true
+                        sync()
+                    }
+                }, RENAME_RETRY_MS)
+            }
             sync()
         }
     }
@@ -202,7 +222,7 @@ class Advertiser(context: Context) {
                 handler.post { if (gen == generation) unregisterDone() }
             }
         }
-        handler.postDelayed({ if (generation == gen && state == State.UNREGISTERING) finishUnregister() }, TIMEOUT_MS)
+        handler.postDelayed({ if (generation == gen && state == State.UNREGISTERING) finishUnregister() }, UNREGISTER_TIMEOUT_MS)
     }
 
     private fun unregisterDone() {
@@ -220,7 +240,11 @@ class Advertiser(context: Context) {
     companion object {
         const val AIRPLAY_TYPE = "_airplay._tcp"
         const val RAOP_TYPE = "_raop._tcp"
-        private const val TIMEOUT_MS = 5_000L
+        // Probing takes about a second, but after a name conflict the responder probes
+        // again under a new name, so a registration is given much longer to complete.
+        private const val REGISTER_TIMEOUT_MS = 15_000L
+        private const val UNREGISTER_TIMEOUT_MS = 5_000L
+        private const val RENAME_RETRY_MS = 10_000L
         private const val RETRY_MIN_MS = 2_000L
         private const val RETRY_MAX_MS = 60_000L
     }
