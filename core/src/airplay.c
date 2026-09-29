@@ -115,6 +115,7 @@ struct airplay_server {
     char pin[8];
     bool pin_active;
     uint64_t pin_since_ns;
+    conn_t *pin_owner;
     float volume_db;
 
     pthread_mutex_t paired_lock;
@@ -334,10 +335,17 @@ static void session_destroy(airplay_server_t *s, session_t *session) {
 /* ------------------------------------------------------------------------- */
 /* connections                                                                */
 
+static void hide_pin(airplay_server_t *s);
+
 static void conn_close(airplay_server_t *s, int index) {
     conn_t *c = s->conns[index];
     if (!c) {
         return;
+    }
+    if (s->pin_owner == c) {
+        /* the sender that asked for a PIN went away: take the code off the screen */
+        s->pin_owner = NULL;
+        hide_pin(s);
     }
     if (c->session) {
         session_destroy(s, c->session);
@@ -646,7 +654,6 @@ static void hide_pin(airplay_server_t *s) {
 }
 
 static void handle_pair_pin_start(airplay_server_t *s, conn_t *c, const rtsp_request_t *req, rtsp_reply_t *reply) {
-    (void) c;
     (void) req;
     if (!s->cfg.require_pin) {
         rtsp_reply_status(reply, 404, "Not Found");
@@ -657,6 +664,7 @@ static void handle_pair_pin_start(airplay_server_t *s, conn_t *c, const rtsp_req
     snprintf(s->pin, sizeof(s->pin), "%04u", (unsigned) (r % 10000));
     s->pin_active = true;
     s->pin_since_ns = time_mono_ns();
+    s->pin_owner = c;
     LOG_I(PAIRING, "showing pairing PIN");
     if (s->ev.pin_display) {
         s->ev.pin_display(s->ev.ctx, s->pin);

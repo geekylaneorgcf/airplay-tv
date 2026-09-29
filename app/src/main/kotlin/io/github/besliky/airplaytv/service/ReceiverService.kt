@@ -252,8 +252,10 @@ class ReceiverService : Service(), NativeBridge.Listener {
         ReceiverState.update { it.copy(addresses = snapshot.ipv4, transport = snapshot.transports) }
         if (!running) return
         if (snapshot.available) {
+            // A new address must be announced again; a first network only needs the registration.
+            val wasPublished = advertiser.isPublished
             publish()
-            advertiser.refresh()
+            if (wasPublished) advertiser.refresh()
         } else {
             advertiser.withdraw()
         }
