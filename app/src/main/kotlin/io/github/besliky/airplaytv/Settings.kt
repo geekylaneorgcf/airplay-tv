@@ -90,7 +90,12 @@ class Settings(context: Context) {
          */
         fun sanitizeName(raw: String?): String? {
             if (raw == null) return null
-            val cleaned = raw.filter { !it.isISOControl() }.trim().replace(Regex("\\s+"), " ")
+            val cleaned = raw
+                .map { if (it.isWhitespace()) ' ' else it }
+                .filter { !it.isISOControl() }
+                .joinToString("")
+                .trim()
+                .replace(Regex(" +"), " ")
             if (cleaned.isEmpty()) return null
             var name = cleaned.take(MAX_NAME_LENGTH)
             while (name.toByteArray(Charsets.UTF_8).size > 49) {
