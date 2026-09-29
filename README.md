@@ -10,7 +10,7 @@ screen appears on the TV. No app to open on the TV first, no account, no cloud.
 AirPlay TV is a small, open-source AirPlay receiver for Android TV and Google TV. It runs
 as a background service, starts with the TV, announces itself on the local network and
 brings up the picture automatically when a sender connects. Video is decoded by the TV's
-hardware decoder straight onto the screen. The whole app is about 300 KB.
+hardware decoder straight onto the screen. The APK is about 350 KB.
 
 ## Features
 
@@ -32,11 +32,14 @@ hardware decoder straight onto the screen. The whole app is about 300 KB.
 
 ## Status
 
-Version 0.1.0 is the first release. Every part of the pipeline — discovery, pairing,
-session setup, the encrypted mirror and audio streams, hardware decoding, autostart and
-recovery — is covered by automated tests, including end-to-end runs of the app on an
-Android TV emulator with a protocol-level test sender. Reports from real TVs and iPhones
-are very welcome; please attach the diagnostics export (Advanced → Export Diagnostics).
+Version 0.1.0 is the first release. The protocol core — pairing, PIN pairing, session
+setup, the encrypted mirror and audio streams and all parsers of network input — is covered
+by unit, loopback and fuzz tests that run on every commit. The app has been run end to end
+on an Android TV emulator with a protocol-level test sender: discovery, mirroring with
+audio, PIN pairing, autostart after a reboot and recovery after the process is killed.
+It has not yet been tried with a real iPhone on TV hardware, so reports from real TVs and
+iPhones are very welcome; please attach the diagnostics export (Advanced → Export
+Diagnostics).
 
 ## Install
 

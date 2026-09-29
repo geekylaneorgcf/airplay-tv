@@ -23,6 +23,11 @@ adb shell chmod 755 /data/local/tmp/airplaytv_tests
 adb shell /data/local/tmp/airplaytv_tests
 ```
 
+With `-DAIRPLAYTV_SANITIZE=ON` the same build runs under AddressSanitizer and
+UndefinedBehaviorSanitizer; push the NDK's `libclang_rt.asan-x86_64-android.so` next to
+the binary and start it with `LD_LIBRARY_PATH=/data/local/tmp`. Leak detection is only
+available in the Linux build.
+
 ## Test sender
 
 `airplaytv_sender` (built with the tests) speaks the sender side of the protocol:
@@ -46,6 +51,7 @@ agree on the key. Everything else is exercised exactly as with a real sender.
 ## Verified on the Android TV emulator (API 36, x86_64)
 
 - install, first launch, settings navigation with the D-pad
+- the release build (R8, release signing) with the test stream and audio
 - service start, `_airplay._tcp` and `_raop._tcp` published once, IP shown
 - a sender session with pairing: decoder created in the background, moved to the
   display surface when the activity appeared, picture shown with the right aspect
