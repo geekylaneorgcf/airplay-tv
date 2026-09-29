@@ -148,6 +148,40 @@ dependencies {
     androidTestImplementation(libs.androidx.test.ext.junit)
 }
 
+// The in-app "Open Source Licenses" page shows these files; they are packaged as an asset.
+abstract class LicenseAssetsTask : DefaultTask() {
+    @get:InputFiles
+    abstract val sources: ConfigurableFileCollection
+
+    @get:OutputDirectory
+    abstract val outputDir: DirectoryProperty
+
+    @TaskAction
+    fun generate() {
+        val separator = "\n\n" + "=".repeat(72) + "\n\n"
+        val text = sources.files.joinToString(separator) { it.readText().trimEnd() } + "\n"
+        val out = outputDir.get().asFile
+        out.mkdirs()
+        File(out, "licenses.txt").writeText(text)
+    }
+}
+
+val licenseAssets = tasks.register<LicenseAssetsTask>("generateLicenseAssets") {
+    sources.from(
+        rootProject.file("NOTICE"),
+        rootProject.file("THIRD_PARTY_LICENSES.md"),
+        rootProject.file("LICENSE"),
+        rootProject.file("core/third_party/mbedtls/LICENSE"),
+        rootProject.file("core/third_party/monocypher/LICENCE.md"),
+    )
+}
+
+androidComponents {
+    onVariants { variant ->
+        variant.sources.assets?.addGeneratedSourceDirectory(licenseAssets, LicenseAssetsTask::outputDir)
+    }
+}
+
 // Collects the release APKs under user-facing names (AirPlayTV-v1.2.3-arm64.apk, ...) together
 // with SHA-256 checksums. CI publishes the content of build/dist as the release assets.
 val abiLabels = mapOf(
