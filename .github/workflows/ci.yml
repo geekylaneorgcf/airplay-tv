@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: Native core
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ninja-build clang
+
+      - name: Build with sanitizers
+        run: |
+          cmake -S core -B build/native -G Ninja -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_BUILD_TYPE=Debug -DAIRPLAYTV_TESTS=ON -DAIRPLAYTV_SANITIZE=ON
+          cmake --build build/native
+
+      - name: Unit and loopback tests (ASan + UBSan)
+        run: ctest --test-dir build/native --output-on-failure
+
+      - name: Build fuzzers
+        run: |
+          cmake -S core -B build/fuzz -G Ninja -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo -DAIRPLAYTV_TESTS=ON -DAIRPLAYTV_FUZZ=ON
+          cmake --build build/fuzz
+
+      - name: Fuzz network parsers (60 s per target)
+        run: |
+          for target in bplist rtsp mirror alac server; do
+            mkdir -p corpus/$target
+            ./build/fuzz/tests/fuzz_$target corpus/$target \
+              -max_total_time=60 -timeout=10 -rss_limit_mb=2048 -print_final_stats=1
+          done
+
+  android:
+    name: Android
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Lint
+        run: ./gradlew lintRelease
+
+      - name: Unit tests
+        run: ./gradlew testDebugUnitTest
+
+      - name: Build debug and release APKs
+        run: ./gradlew assembleDebug packageReleaseApks
+
+      - name: Upload APKs
+        uses: actions/upload-artifact@v7
+        with:
+          name: AirPlayTV-${{ github.sha }}
+          path: |
+            app/build/dist/
+            app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: reports-${{ github.sha }}
+          path: app/build/reports/
+          if-no-files-found: ignore

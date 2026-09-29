@@ -1,3 +1,4 @@
+import java.security.MessageDigest
 import java.util.Properties
 
 plugins {
@@ -145,4 +146,39 @@ dependencies {
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.ext.junit)
+}
+
+// Collects the release APKs under user-facing names (AirPlayTV-v1.2.3-arm64.apk, ...) together
+// with SHA-256 checksums. CI publishes the content of build/dist as the release assets.
+val abiLabels = mapOf(
+    "arm64-v8a" to "arm64",
+    "armeabi-v7a" to "armv7",
+    "x86_64" to "x86_64",
+    "universal" to "universal",
+)
+
+tasks.register("packageReleaseApks") {
+    group = "distribution"
+    description = "Copies release APKs to build/dist with release names and writes SHA256SUMS."
+    dependsOn("assembleRelease")
+    val apkDir = layout.buildDirectory.dir("outputs/apk/release")
+    val distDir = layout.buildDirectory.dir("dist")
+    val versionLabel = appVersionName
+    inputs.dir(apkDir)
+    outputs.dir(distDir)
+    doLast {
+        val out = distDir.get().asFile
+        out.deleteRecursively()
+        out.mkdirs()
+        val sums = StringBuilder()
+        apkDir.get().asFile.listFiles { f -> f.extension == "apk" }.orEmpty().sortedBy { it.name }.forEach { apk ->
+            val abi = abiLabels.entries.firstOrNull { apk.name.contains("-${it.key}-") }?.value ?: return@forEach
+            val target = File(out, "AirPlayTV-v$versionLabel-$abi.apk")
+            apk.copyTo(target, overwrite = true)
+            val digest = MessageDigest.getInstance("SHA-256").digest(target.readBytes())
+            sums.append(digest.joinToString("") { "%02x".format(it) }).append("  ").append(target.name).append('\n')
+        }
+        File(out, "SHA256SUMS").writeText(sums.toString())
+        logger.lifecycle("Release APKs written to $out")
+    }
 }
