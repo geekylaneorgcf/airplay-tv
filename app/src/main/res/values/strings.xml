@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name" translatable="false">AirPlay TV</string>
+    <string name="title_airplay" translatable="false">AirPlay</string>
+
+    <!-- status -->
+    <string name="status_ready">Ready</string>
+    <string name="status_starting">Starting…</string>
+    <string name="status_off">Off</string>
+    <string name="status_no_network">No network</string>
+    <string name="status_error">Unavailable</string>
+    <string name="status_connected">Connected</string>
+    <string name="hint_waiting">Waiting for iPhone</string>
+    <string name="hint_no_network">Connect this TV to Wi‑Fi or Ethernet</string>
+    <string name="hint_off">AirPlay is turned off</string>
+    <string name="hint_mirroring">%1$s is connected</string>
+    <string name="hint_error">The receiver could not start</string>
+    <string name="notification_ready">Ready as “%1$s”</string>
+    <string name="notification_session">%1$s wants to mirror its screen. Select to show it.</string>
+    <string name="channel_receiver">AirPlay receiver</string>
+    <string name="channel_session">Screen mirroring</string>
+
+    <!-- playback -->
+    <string name="playback_connecting">Connecting…</string>
+    <string name="playback_waiting_for">Waiting for %1$s</string>
+    <string name="playback_audio_only">Playing audio from %1$s</string>
+    <string name="pin_hint">Enter this code on your iPhone</string>
+
+    <!-- settings -->
+    <string name="setting_device_name">Device Name</string>
+    <string name="setting_airplay">AirPlay</string>
+    <string name="setting_require_pin">Require PIN</string>
+    <string name="setting_autostart">Start Automatically</string>
+    <string name="setting_connection_info">Show Connection Info</string>
+    <string name="setting_auto_open">Open Automatically</string>
+    <string name="setting_advanced">Advanced</string>
+    <string name="value_on">On</string>
+    <string name="value_off">Off</string>
+    <string name="value_allowed">Allowed</string>
+    <string name="value_allow">Allow</string>
+    <string name="value_automatic">Automatic</string>
+
+    <string name="advanced_title">Advanced</string>
+    <string name="setting_decoder">Preferred Decoder</string>
+    <string name="setting_resolution">Resolution Limit</string>
+    <string name="setting_frame_rate">Frame Rate</string>
+    <string name="setting_overlay">Performance Overlay</string>
+    <string name="setting_logs">Detailed Logs</string>
+    <string name="setting_diagnostics">Export Diagnostics</string>
+    <string name="setting_reset_pairing">Reset Pairing</string>
+    <string name="setting_paired_devices">Paired Devices</string>
+    <string name="setting_licenses">Open Source Licenses</string>
+    <string name="setting_version">Version</string>
+    <string name="value_fps">%1$d fps</string>
+    <string name="value_4k_unavailable">4K needs a hardware HEVC decoder</string>
+
+    <!-- dialogs -->
+    <string name="dialog_name_title">Device Name</string>
+    <string name="dialog_name_hint">Shown on your iPhone</string>
+    <string name="dialog_ok">OK</string>
+    <string name="dialog_cancel">Cancel</string>
+    <string name="dialog_close">Close</string>
+    <string name="dialog_reset_title">Reset pairing?</string>
+    <string name="dialog_reset_message">All iPhones will have to be paired again. Senders that connected with a PIN are forgotten.</string>
+    <string name="dialog_reset_confirm">Reset</string>
+    <string name="dialog_reset_done">Pairing has been reset.</string>
+    <string name="dialog_overlay_title">Open automatically</string>
+    <string name="dialog_overlay_message">To show your iPhone’s screen as soon as mirroring starts, allow AirPlay TV to display over other apps.\n\nThis TV does not offer that setting in its menus. It can be enabled once from a computer:\n\nadb shell appops set %1$s SYSTEM_ALERT_WINDOW allow</string>
+    <string name="dialog_diagnostics_title">Diagnostics</string>
+    <string name="dialog_diagnostics_saved">Saved to %1$s</string>
+    <string name="dialog_decoder_title">Preferred Decoder</string>
+</resources>

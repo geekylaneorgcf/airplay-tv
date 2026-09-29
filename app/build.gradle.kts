@@ -1,0 +1,148 @@
+import java.util.Properties
+
+plugins {
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
+}
+
+// Version is taken from -PversionName (set by CI from the git tag) or defaults to the
+// in-tree development version. The version code is derived from it so that every
+// release sorts correctly: 1.2.3 -> 10203.
+val appVersionName: String = (findProperty("versionName") as String?)?.removePrefix("v") ?: "0.1.0"
+val appVersionCode: Int = appVersionName.split('.', '-').take(3)
+    .map { it.toIntOrNull() ?: 0 }
+    .let { (it + listOf(0, 0, 0)).take(3) }
+    .let { (major, minor, patch) -> major * 10000 + minor * 100 + patch }
+
+// Release signing. Credentials come from environment variables (CI secrets) or from an
+// untracked keystore.properties file. When neither is present, release builds are signed
+// with the local debug key so that they stay installable for testing.
+val releaseSigning: Map<String, String>? = run {
+    val env = System.getenv()
+    val fromEnv = listOf("RELEASE_KEYSTORE_FILE", "RELEASE_KEYSTORE_PASSWORD", "RELEASE_KEY_ALIAS", "RELEASE_KEY_PASSWORD")
+        .associateWith { env[it].orEmpty() }
+    if (fromEnv.values.all { it.isNotEmpty() } && file(fromEnv.getValue("RELEASE_KEYSTORE_FILE")).exists()) {
+        return@run fromEnv
+    }
+    val propsFile = rootProject.file("keystore.properties")
+    if (!propsFile.exists()) return@run null
+    val props = Properties().apply { propsFile.inputStream().use { load(it) } }
+    mapOf(
+        "RELEASE_KEYSTORE_FILE" to rootProject.file(props.getProperty("storeFile", "")).path,
+        "RELEASE_KEYSTORE_PASSWORD" to props.getProperty("storePassword", ""),
+        "RELEASE_KEY_ALIAS" to props.getProperty("keyAlias", ""),
+        "RELEASE_KEY_PASSWORD" to props.getProperty("keyPassword", ""),
+    ).takeIf { m -> m.values.all { it.isNotEmpty() } && file(m.getValue("RELEASE_KEYSTORE_FILE")).exists() }
+}
+
+android {
+    namespace = "io.github.besliky.airplaytv"
+    compileSdk = 36
+    ndkVersion = "28.2.13676358"
+
+    defaultConfig {
+        applicationId = "io.github.besliky.airplaytv"
+        minSdk = 26
+        targetSdk = 35
+        versionCode = appVersionCode
+        versionName = appVersionName
+
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+        }
+        externalNativeBuild {
+            cmake {
+                arguments += listOf("-DANDROID_STL=none", "-DAIRPLAYTV_ANDROID=ON")
+            }
+        }
+    }
+
+    signingConfigs {
+        create("release") {
+            val s = releaseSigning
+            if (s != null) {
+                storeFile = file(s.getValue("RELEASE_KEYSTORE_FILE"))
+                storePassword = s.getValue("RELEASE_KEYSTORE_PASSWORD")
+                keyAlias = s.getValue("RELEASE_KEY_ALIAS")
+                keyPassword = s.getValue("RELEASE_KEY_PASSWORD")
+                enableV1Signing = false
+                enableV2Signing = true
+                enableV3Signing = true
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = if (releaseSigning != null) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
+        }
+        debug {
+            isJniDebuggable = true
+        }
+    }
+
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86_64")
+            isUniversalApk = true
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("../core/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+
+    buildFeatures {
+        buildConfig = true
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    packaging {
+        jniLibs {
+            // Compressed native libraries keep the download small; they are extracted once at install.
+            useLegacyPackaging = true
+        }
+        resources {
+            excludes += listOf("/META-INF/*.version", "/META-INF/**/*.kotlin_module", "kotlin/**", "DebugProbesKt.bin")
+        }
+    }
+
+    lint {
+        abortOnError = true
+        checkReleaseBuilds = true
+        warningsAsErrors = false
+        disable += listOf("GradleDependency", "NewerVersionAvailable", "AndroidGradlePluginVersion", "OldTargetApi")
+    }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+}
+
+kotlin {
+    jvmToolchain(17)
+}
+
+dependencies {
+    testImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+}

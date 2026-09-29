@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="background">#FF0B0B0D</color>
+    <color name="surface">#FF1C1C1E</color>
+    <color name="surface_focused">#FFF5F5F7</color>
+    <color name="text_primary">#FFF5F5F7</color>
+    <color name="text_secondary">#FF8E8E93</color>
+    <color name="text_on_focus">#FF0B0B0D</color>
+    <color name="text_on_focus_secondary">#FF48484A</color>
+    <color name="status_ready">#FF30D158</color>
+    <color name="status_warning">#FFFFD60A</color>
+    <color name="overlay_background">#B3000000</color>
+</resources>
