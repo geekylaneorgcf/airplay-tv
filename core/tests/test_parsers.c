@@ -255,7 +255,7 @@ TEST(util_encoding) {
     CHECK(hex_decode("dead01f", back, 4) != 0);
     CHECK(hex_decode("zz", back, 1) != 0);
 
-    char b64[16];
+    char b64[32];
     base64_encode((const uint8_t *) "any carnal pleas", 16, b64);
     CHECK_STR(b64, "YW55IGNhcm5hbCBwbGVhcw==");
     base64_encode((const uint8_t *) "ab", 2, b64);
