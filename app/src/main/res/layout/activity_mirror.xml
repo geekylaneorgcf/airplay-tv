@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:keepScreenOn="true"
+    tools:ignore="MergeRootFrame">
+
+    <SurfaceView
+        android:id="@+id/surface"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_gravity="center" />
+
+    <LinearLayout
+        android:id="@+id/standby"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@android:color/black"
+        android:gravity="center"
+        android:orientation="vertical">
+
+        <ImageView
+            android:layout_width="96dp"
+            android:layout_height="92dp"
+            android:contentDescription="@null"
+            android:src="@drawable/ic_airplay_glyph" />
+
+        <TextView
+            android:id="@+id/standbyTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="28dp"
+            android:fontFamily="sans-serif-medium"
+            android:text="@string/title_airplay"
+            android:textColor="@color/text_primary"
+            android:textSize="44sp" />
+
+        <TextView
+            android:id="@+id/standbyText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:fontFamily="sans-serif-light"
+            android:gravity="center"
+            android:textColor="@color/text_secondary"
+            android:textSize="24sp" />
+
+        <TextView
+            android:id="@+id/pin"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="36dp"
+            android:fontFamily="sans-serif-light"
+            android:letterSpacing="0.35"
+            android:textColor="@color/text_primary"
+            android:textSize="96sp"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/standbyInfo"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="36dp"
+            android:fontFamily="sans-serif"
+            android:textColor="@color/text_secondary"
+            android:textSize="18sp" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/overlay"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:layout_margin="24dp"
+        android:background="@drawable/overlay_background"
+        android:fontFamily="monospace"
+        android:lineSpacingExtra="2dp"
+        android:padding="14dp"
+        android:textColor="@color/text_primary"
+        android:textSize="13sp"
+        android:visibility="gone" />
+</FrameLayout>
