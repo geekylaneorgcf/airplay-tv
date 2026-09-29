@@ -87,6 +87,7 @@ endif()
 if(AIRPLAYTV_ANDROID)
     add_library(airplaytv SHARED
         android/jni_main.c
+        android/audio_pipeline.c
         android/video_decoder.c)
     target_compile_options(airplaytv PRIVATE ${COMMON_FLAGS} -fvisibility=hidden)
     target_link_libraries(airplaytv PRIVATE airplay_core log mediandk android)

@@ -26,6 +26,7 @@
 #include <string.h>
 
 #include "airplay.h"
+#include "audio_pipeline.h"
 #include "log.h"
 #include "platform.h"
 #include "util.h"
@@ -229,12 +230,42 @@ static void m_video_stop(void *ctx) {
     vd_stop();
 }
 
+static bool m_audio_start(void *ctx, const audio_format_t *format) {
+    (void) ctx;
+    return ap_start(format);
+}
+
+static void m_audio_frame(void *ctx, const uint8_t *data, size_t len, uint32_t rtp_ts, uint64_t remote_ts_ns) {
+    (void) ctx;
+    ap_frame(data, len, rtp_ts, remote_ts_ns);
+}
+
+static void m_audio_flush(void *ctx) {
+    (void) ctx;
+    ap_flush();
+}
+
+static void m_audio_volume(void *ctx, float db) {
+    (void) ctx;
+    ap_volume(db);
+}
+
+static void m_audio_stop(void *ctx) {
+    (void) ctx;
+    ap_stop();
+}
+
 static const media_sink_ops_t kMediaOps = {
     .video_start = m_video_start,
     .video_config = m_video_config,
     .video_frame = m_video_frame,
     .video_suspend = m_video_suspend,
     .video_stop = m_video_stop,
+    .audio_start = m_audio_start,
+    .audio_frame = m_audio_frame,
+    .audio_flush = m_audio_flush,
+    .audio_volume = m_audio_volume,
+    .audio_stop = m_audio_stop,
 };
 
 /* ------------------------------------------------------------------------- */
@@ -439,6 +470,19 @@ static void JNICALL n_set_decoder_preferences(JNIEnv *env, jclass cls, jstring a
     }
 }
 
+static jint JNICALL n_read_audio(JNIEnv *env, jclass cls, jobject buffer, jint max_bytes, jint timeout_ms) {
+    (void) cls;
+    uint8_t *dst = (uint8_t *) (*env)->GetDirectBufferAddress(env, buffer);
+    jlong cap = (*env)->GetDirectBufferCapacity(env, buffer);
+    if (!dst || cap <= 0) {
+        return -1;
+    }
+    if (max_bytes > cap) {
+        max_bytes = (jint) cap;
+    }
+    return ap_read(dst, max_bytes, timeout_ms);
+}
+
 static void JNICALL n_stats(JNIEnv *env, jclass cls, jlongArray out) {
     (void) cls;
     jlong v[25];
@@ -510,6 +554,7 @@ static const JNINativeMethod kMethods[] = {
     { "nativeDisconnect", "()V", (void *) n_disconnect },
     { "nativeSetSurface", "(Landroid/view/Surface;)V", (void *) n_set_surface },
     { "nativeSetDecoderPreferences", "(Ljava/lang/String;Ljava/lang/String;I)V", (void *) n_set_decoder_preferences },
+    { "nativeReadAudio", "(Ljava/nio/ByteBuffer;II)I", (void *) n_read_audio },
     { "nativeStats", "([J)V", (void *) n_stats },
     { "nativeLogHistory", "()Ljava/lang/String;", (void *) n_log_history },
     { "nativeSessionActive", "()Z", (void *) n_session_active },
