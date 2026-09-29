@@ -6,6 +6,9 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS ON)
 
 option(AIRPLAYTV_ANDROID "Build the Android JNI library" OFF)
+option(AIRPLAYTV_TESTS "Build host unit tests" OFF)
+option(AIRPLAYTV_FUZZ "Build libFuzzer targets (clang only)" OFF)
+option(AIRPLAYTV_SANITIZE "Build with address and undefined behaviour sanitizers" OFF)
 
 set(TP ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
@@ -16,6 +19,17 @@ if(AIRPLAYTV_ANDROID AND CMAKE_BUILD_TYPE MATCHES "Rel")
 endif()
 
 set(COMMON_FLAGS -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare -ffunction-sections -fdata-sections)
+
+# Sanitizer builds: AddressSanitizer everywhere, UndefinedBehaviorSanitizer on our
+# own code (the vendored FairPlay code relies on type punning by design).
+if(AIRPLAYTV_FUZZ OR AIRPLAYTV_SANITIZE)
+    add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=address,undefined)
+    list(APPEND COMMON_FLAGS -fsanitize=undefined -fno-sanitize-recover=undefined)
+endif()
+if(AIRPLAYTV_FUZZ)
+    add_compile_options(-fsanitize=fuzzer-no-link)
+endif()
 
 # --- third party --------------------------------------------------------------
 
@@ -96,4 +110,11 @@ if(AIRPLAYTV_ANDROID)
         -Wl,--exclude-libs,ALL
         -Wl,--as-needed
         -Wl,-z,max-page-size=16384)
+endif()
+
+# --- tests --------------------------------------------------------------------
+
+if(AIRPLAYTV_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
 endif()

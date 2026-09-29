@@ -1187,7 +1187,7 @@ static bool process_rx(airplay_server_t *s, conn_t *c) {
         uint8_t *out = NULL;
         size_t out_len = 0;
         if (rtsp_reply_serialize(&reply, req->protocol, &out, &out_len) == 0) {
-            if (net_send_all(c->fd, out, out_len, 3000) != 0) {
+            if (c->fd >= 0 && net_send_all(c->fd, out, out_len, 3000) != 0) {
                 keep = false;
             }
             free(out);
@@ -1492,3 +1492,28 @@ bool airplay_server_session_active(airplay_server_t *s) {
     return s && atomic_load(&s->session_active);
 }
 
+#ifdef AIRPLAYTV_FUZZING
+/* Feeds raw bytes through the request handlers as if they came from a LAN client. */
+void airplay_server_fuzz_input(airplay_server_t *s, const uint8_t *data, size_t len) {
+    conn_t *c = (conn_t *) calloc(1, sizeof(conn_t));
+    if (!c) {
+        return;
+    }
+    c->fd = -1;
+    struct sockaddr_in *peer = (struct sockaddr_in *) &c->peer;
+    peer->sin_family = AF_INET;
+    peer->sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    c->created_ns = c->last_rx_ns = time_mono_ns();
+    pairing_session_init(&c->pair);
+    fairplay_reset(&c->fp);
+    c->rx = (uint8_t *) malloc(len ? len : 1);
+    if (c->rx) {
+        memcpy(c->rx, data, len);
+        c->rx_len = len;
+        c->rx_cap = len;
+    }
+    s->conns[0] = c;
+    process_rx(s, c);
+    conn_close(s, 0);
+}
+#endif

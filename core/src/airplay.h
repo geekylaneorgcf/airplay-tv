@@ -77,4 +77,8 @@ int airplay_txt_raop(const airplay_server_t *s, txt_entry_t *out, int max);
 /* DNS TXT wire encoding (length-prefixed "key=value" strings). */
 size_t airplay_txt_encode(const txt_entry_t *entries, int count, uint8_t *out, size_t cap);
 
+#ifdef AIRPLAYTV_FUZZING
+void airplay_server_fuzz_input(airplay_server_t *s, const uint8_t *data, size_t len);
+#endif
+
 #endif
