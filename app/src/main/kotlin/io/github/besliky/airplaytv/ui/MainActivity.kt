@@ -34,6 +34,10 @@ class MainActivity : SettingsPage() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (opensNowPlaying(intent)) {
+            openNowPlaying()
+            return
+        }
         settings = Settings(this)
 
         nameRow = addRow(getString(R.string.setting_device_name)) {
@@ -67,7 +71,27 @@ class MainActivity : SettingsPage() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        if (opensNowPlaying(intent)) {
+            openNowPlaying()
+            return
+        }
         showPreviewIfRequested(intent)
+    }
+
+    /**
+     * Starting the app from the Home screen while a sender plays audio means "show me what is playing",
+     * so go straight to the player. The player's Menu key opens this page with [EXTRA_STAY] set.
+     */
+    private fun opensNowPlaying(intent: Intent?): Boolean {
+        if (intent == null || intent.action != Intent.ACTION_MAIN) return false
+        if (intent.getBooleanExtra(EXTRA_STAY, false) || intent.hasExtra(NowPlayingActivity.EXTRA_PREVIEW)) return false
+        val s = ReceiverState.current
+        return s.status == Status.CONNECTED && s.audioActive && !s.videoActive
+    }
+
+    private fun openNowPlaying() {
+        startActivity(Intent(this, NowPlayingActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP))
+        finish()
     }
 
     /** Development aid: `--es preview now` shows the Now Playing screen with sample data, see [PreviewMode]. */
@@ -83,7 +107,11 @@ class MainActivity : SettingsPage() {
             "dither" -> return DitherPreview.show(this)
         }
         val target = if (mode.startsWith("photo")) PhotoActivity::class.java else NowPlayingActivity::class.java
-        startActivity(Intent(this, target).putExtra(NowPlayingActivity.EXTRA_PREVIEW, mode))
+        val forward = Intent(this, target).putExtra(NowPlayingActivity.EXTRA_PREVIEW, mode)
+        if (intent.hasExtra(NowPlayingActivity.EXTRA_SPEED)) {
+            forward.putExtra(NowPlayingActivity.EXTRA_SPEED, intent.getIntExtra(NowPlayingActivity.EXTRA_SPEED, 60))
+        }
+        startActivity(forward)
     }
 
     private fun sleepValue(): String {
@@ -133,6 +161,7 @@ class MainActivity : SettingsPage() {
 
     override fun onStart() {
         super.onStart()
+        if (!::settings.isInitialized) return // forwarded to the player in onCreate
         if (settings.enabled) ReceiverService.start(this)
         settings.registerListener(prefsListener)
         ReceiverState.observe(stateListener)
@@ -140,9 +169,16 @@ class MainActivity : SettingsPage() {
     }
 
     override fun onStop() {
-        ReceiverState.remove(stateListener)
-        settings.unregisterListener(prefsListener)
+        if (::settings.isInitialized) {
+            ReceiverState.remove(stateListener)
+            settings.unregisterListener(prefsListener)
+        }
         super.onStop()
+    }
+
+    companion object {
+        /** Set when the page is opened from the player's Menu key, so that it is not forwarded back to the player. */
+        const val EXTRA_STAY = "stay"
     }
 
     private fun canOpenAutomatically(): Boolean =

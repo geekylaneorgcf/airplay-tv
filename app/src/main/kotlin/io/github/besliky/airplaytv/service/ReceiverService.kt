@@ -1,5 +1,6 @@
 package io.github.besliky.airplaytv.service
 
+import android.app.PendingIntent
 import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -39,8 +40,6 @@ import io.github.besliky.airplaytv.ui.MirrorActivity
 import io.github.besliky.airplaytv.ui.NowPlayingActivity
 import io.github.besliky.airplaytv.ui.PhotoActivity
 import java.util.concurrent.Executors
-import kotlin.math.log10
-import kotlin.math.pow
 
 /**
  * Headless AirPlay receiver. Runs as a foreground service for as long as AirPlay is
@@ -70,6 +69,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
     private var audioSampleRate = 44100
     private var savedStreamIndex = -1
     private var levelBeforeMute = 1f
+    private var phoneGain = -1f
     private var trackKey = ""
     private val trackHistory = ArrayList<String>()
     private var lyricsKey = ""
@@ -154,7 +154,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
 
     /** The remote changed the volume: apply it for real and show it. The phone's next change replaces it. */
     private fun setVolumeLevel(level: Float) {
-        audio.setVolume(levelToGain(level))
+        audio.setVolume(VolumeScale.levelToGain(level))
         ReceiverState.update { it.copy(volume = level, volumeAtMs = SystemClock.elapsedRealtime()) }
     }
 
@@ -211,15 +211,6 @@ class ReceiverService : Service(), NativeBridge.Listener {
         }
     }
 
-    private fun gainToLevel(gain: Float): Float {
-        // The sender's slider spans -30 dB (quietest) to 0 dB (full); -144 dB means mute.
-        val db = if (gain <= 0f) -144f else 20f * log10(gain)
-        return ((db + 30f) / 30f).coerceIn(0f, 1f)
-    }
-
-    /** The AirPlay slider scale: -30 dB at the bottom, 0 dB at the top, silence at 0. */
-    private fun levelToGain(level: Float): Float =
-        if (level <= 0f) 0f else 10f.pow((level - 1f) * 30f / 20f)
     private var lastProgressMs = -1L
     private var lastProgressAt = 0L
     private var prevAnchorMs = -1L
@@ -603,6 +594,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
         wakeDisplay()
         acquireSessionLocks()
         startVolumeWatch()
+        phoneGain = -1f
         trackKey = ""
         trackHistory.clear()
         ReceiverState.update {
@@ -629,6 +621,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
         handler.removeCallbacks(lyricsRunnable)
         lyricsToken++
         lyricsKey = ""
+        phoneGain = -1f
         trackKey = ""
         trackHistory.clear()
         dacp?.clear()
@@ -678,8 +671,14 @@ class ReceiverService : Service(), NativeBridge.Listener {
     }
 
     override fun onVolume(gain: Float) {
+        // The core reports the sender's volume again each time a stream starts, so a new track or a
+        // resume repeats the same number. That is not the slider moving: it must not undo a volume
+        // set with the TV remote, and it must not count as someone using the screen.
+        val repeated = phoneGain >= 0f && VolumeScale.sameGain(gain, phoneGain)
+        phoneGain = gain
+        if (repeated) return
         audio.setVolume(gain)
-        ReceiverState.update { it.copy(volume = gainToLevel(gain), volumeAtMs = SystemClock.elapsedRealtime()) }
+        ReceiverState.update { it.copy(volume = VolumeScale.gainToLevel(gain), volumeAtMs = SystemClock.elapsedRealtime()) }
     }
 
     override fun onTrackInfo(title: String, artist: String, album: String) {
@@ -813,6 +812,13 @@ class ReceiverService : Service(), NativeBridge.Listener {
             override fun onFastForward() = RemoteControl.send(DacpClient.NEXT)
             override fun onRewind() = RemoteControl.send(DacpClient.PREVIOUS)
         })
+        session.setSessionActivity(
+            PendingIntent.getActivity(
+                this, 0,
+                Intent(this, NowPlayingActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            ),
+        )
         session.isActive = true
         mediaSession = session
         refreshMediaSession()

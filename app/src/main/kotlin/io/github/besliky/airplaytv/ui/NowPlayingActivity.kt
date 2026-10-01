@@ -16,6 +16,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.KeyEvent
@@ -39,6 +40,7 @@ import io.github.besliky.airplaytv.service.RemoteControl
 import io.github.besliky.airplaytv.service.SleepService
 import java.util.Locale
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.sin
 
 /**
@@ -56,7 +58,7 @@ import kotlin.math.sin
  */
 class NowPlayingActivity : Activity() {
 
-    private enum class Presence { ACTIVE, DIM, AMBIENT, BLANK, GOODNIGHT }
+    private enum class Presence { ACTIVE, DIM, MINIMAL, BLACK, BLANK, GOODNIGHT }
 
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var settings: Settings
@@ -67,6 +69,7 @@ class NowPlayingActivity : Activity() {
     private var lastArtworkSeq = 0
     private var lastArtworkAt = 0L
     private var lastVolumeAt = 0L
+    private var shownVolume = -1f
     private var lastLyricsKey: Any? = null
     private var previousAlbum = ""
     private var shownPlaying = true
@@ -75,6 +78,9 @@ class NowPlayingActivity : Activity() {
 
     private var presence = Presence.ACTIVE
     private var lastInteraction = SystemClock.elapsedRealtime()
+    private var peekUntil = 0L
+    private var timeline = PresenceTimeline.STANDARD
+    private var presenceTickMs = PRESENCE_TICK_MS
     private var pausedSince = 0L
     private val startedAt = SystemClock.elapsedRealtime()
 
@@ -113,10 +119,11 @@ class NowPlayingActivity : Activity() {
     private lateinit var lyricsProgress: PillBar
     private lateinit var lyricsVolume: LinearLayout
     private lateinit var lyricsVolumeBar: PillBar
-    private lateinit var ambient: LinearLayout
-    private lateinit var ambientArt: ImageView
-    private lateinit var ambientTitle: TextView
-    private lateinit var ambientArtist: TextView
+    private lateinit var aod: LinearLayout
+    private lateinit var aodTitle: TextView
+    private lateinit var aodElapsed: TextView
+    private lateinit var aodRemaining: TextView
+    private lateinit var aodBar: PillBar
     private lateinit var goodnightView: TextView
 
     // ---- colours ----
@@ -138,7 +145,7 @@ class NowPlayingActivity : Activity() {
     private val presenceTick = object : Runnable {
         override fun run() {
             evaluatePresence()
-            handler.postDelayed(this, PRESENCE_TICK_MS)
+            handler.postDelayed(this, presenceTickMs)
         }
     }
 
@@ -183,6 +190,7 @@ class NowPlayingActivity : Activity() {
         settings = Settings(this)
         preview = intent.getStringExtra(EXTRA_PREVIEW)
         preview?.let { PreviewMode.begin(it) }
+        applyPreviewSpeed(intent)
 
         setContentView(buildContent())
         lastVolumeAt = ReceiverState.current.volumeAtMs
@@ -192,10 +200,10 @@ class NowPlayingActivity : Activity() {
         super.onStart()
         ReceiverState.observe(stateListener)
         handler.post(tick)
-        handler.postDelayed(presenceTick, PRESENCE_TICK_MS)
+        handler.postDelayed(presenceTick, presenceTickMs)
         handler.postDelayed(orbitTick, ORBIT_STEP_MS)
         handler.postDelayed(driftTick, 1000)
-        noteInteraction()
+        noteInteraction("start")
         preview?.let { applyPreviewMode(it) }
     }
 
@@ -205,7 +213,9 @@ class NowPlayingActivity : Activity() {
         val mode = intent.getStringExtra(EXTRA_PREVIEW) ?: return
         preview = mode
         PreviewMode.begin(mode)
+        applyPreviewSpeed(intent)
         lastVolumeAt = ReceiverState.current.volumeAtMs
+        lastInteraction = SystemClock.elapsedRealtime()
         setPresence(Presence.ACTIVE)
         closeLyrics()
         applyPreviewMode(mode)
@@ -446,28 +456,36 @@ class NowPlayingActivity : Activity() {
             addView(lyricsPage, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         }
 
-        // ---- ambient card: a small card that drifts across black while nobody is looking
-        ambientArt = ImageView(this).apply {
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            setBackgroundColor(ART_PLACEHOLDER)
-            outlineProvider = roundOutline(10)
-            clipToOutline = true
+        // ---- minimal display: while nobody is looking only what changes stays lit, small and dim, on
+        // black. It drifts slowly over the whole screen so that no pixel stays on.
+        aodTitle = label(15f, AOD_TEXT, light)
+        aodElapsed = label(13f, AOD_TEXT, light).apply {
+            fontFeatureSettings = "tnum"
+            gravity = Gravity.START or Gravity.CENTER_VERTICAL
         }
-        ambientTitle = label(18f, Color.WHITE, medium)
-        ambientArtist = label(15f, SECONDARY, light)
-        ambient = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+        aodRemaining = label(13f, AOD_TEXT, light).apply {
+            fontFeatureSettings = "tnum"
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+        }
+        aodBar = PillBar(this).apply {
+            fillColor = AOD_FILL
+            trackColor = AOD_TRACK
+        }
+        aod = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             alpha = 0f
             visibility = View.GONE
-            addView(ambientArt, LinearLayout.LayoutParams(dp(AMBIENT_ART_DP), dp(AMBIENT_ART_DP)))
+            addView(aodTitle, LinearLayout.LayoutParams(dp(AOD_WIDTH_DP), ViewGroup.LayoutParams.WRAP_CONTENT))
             addView(LinearLayout(this@NowPlayingActivity).apply {
-                orientation = LinearLayout.VERTICAL
-                addView(ambientTitle, LinearLayout.LayoutParams(dp(260), ViewGroup.LayoutParams.WRAP_CONTENT))
-                addView(ambientArtist, LinearLayout.LayoutParams(dp(260), ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(3) })
-            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                marginStart = dp(16)
-            })
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(aodElapsed, LinearLayout.LayoutParams(dp(42), ViewGroup.LayoutParams.WRAP_CONTENT))
+                addView(aodBar, LinearLayout.LayoutParams(0, dp(4), 1f).apply {
+                    marginStart = dp(8)
+                    marginEnd = dp(8)
+                })
+                addView(aodRemaining, LinearLayout.LayoutParams(dp(48), ViewGroup.LayoutParams.WRAP_CONTENT))
+            }, LinearLayout.LayoutParams(dp(AOD_WIDTH_DP), ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10) })
         }
 
         // The orbit layer only ever moves and the stage only ever fades, so their animations never fight.
@@ -476,7 +494,7 @@ class NowPlayingActivity : Activity() {
             addView(stage, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         }
         root.addView(orbitLayer, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        root.addView(ambient, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        root.addView(aod, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         goodnightView = label(22f, 0xFF8E8E93.toInt(), light).apply {
             alpha = 0f
             visibility = View.GONE
@@ -546,8 +564,9 @@ class NowPlayingActivity : Activity() {
             applyPlaying(s.playing, animate = false)
             val level = if (s.volume >= 0f) s.volume else 1f
             volumeBar.setFraction(level, false)
+            shownVolume = level
             updateSpeakers(level)
-            renderAmbient(s)
+            renderAod(s)
             renderLyricsHeader(s)
         } else {
             if (s.trackSeq != lastTrackSeq) {
@@ -559,7 +578,7 @@ class NowPlayingActivity : Activity() {
                 setTextNow(albumView, s.album)
                 artistView.visibility = if (s.artist.isBlank()) View.GONE else View.VISIBLE
                 albumView.visibility = if (s.album.isBlank()) View.GONE else View.VISIBLE
-                renderAmbient(s)
+                renderAod(s)
                 renderLyricsHeader(s)
             }
             if (s.artworkSeq != lastArtworkSeq) {
@@ -570,7 +589,7 @@ class NowPlayingActivity : Activity() {
                 shownPlaying = s.playing
                 applyPlaying(s.playing, animate = true)
                 pausedSince = if (s.playing) 0L else SystemClock.elapsedRealtime()
-                if (s.playing && presence == Presence.BLANK) setPresence(Presence.AMBIENT)
+                if (s.playing && presence == Presence.BLANK) setPresence(Presence.MINIMAL)
             }
         }
 
@@ -598,9 +617,13 @@ class NowPlayingActivity : Activity() {
         albumView.visibility = if (s.album.isBlank()) View.GONE else View.VISIBLE
         progressBar.setFraction(0f, false)
         lyricsProgress.setFraction(0f, false)
-        renderAmbient(s)
+        renderAod(s)
         renderLyricsHeader(s)
-        if (presence == Presence.DIM) setPresence(Presence.ACTIVE)
+        if (presence == Presence.DIM) {
+            // A new song shows itself for a moment; this is not someone at the remote, so the idle clock runs on.
+            peekUntil = SystemClock.elapsedRealtime() + PEEK_MS
+            setPresence(Presence.ACTIVE)
+        }
 
         // The cover normally arrives within a moment of the track info; if it does not, the new track
         // has none and the old one has to go. A cover that arrived just before the info is kept.
@@ -618,7 +641,7 @@ class NowPlayingActivity : Activity() {
         showArtwork(s.artwork, s.trackDirection, animate = true)
         artworkColors = s.artColors ?: ArtworkColors.NEUTRAL
         applyArtworkColors(artworkColors, animate = true)
-        renderAmbient(s)
+        renderAod(s)
     }
 
     /** Sets [text] at once and drops any slide that is still running. */
@@ -653,7 +676,6 @@ class NowPlayingActivity : Activity() {
         outgoing.animate().cancel()
         incoming.setImageBitmap(bitmap)
         lyricsArt.setImageBitmap(bitmap)
-        ambientArt.setImageBitmap(bitmap)
         incoming.bringToFront()
         artFront = incoming
         if (!animate) {
@@ -695,10 +717,10 @@ class NowPlayingActivity : Activity() {
         }
     }
 
-    /** Moves the backdrop and the bars to [colors]; on black (ambient/blank) the backdrop stays pure black. */
+    /** Moves the backdrop and the bars to [colors]; on black (minimal, black, blank) the backdrop stays pure black. */
     private fun applyArtworkColors(colors: ArtworkColors, animate: Boolean) {
         artworkColors = colors
-        val dark = presence == Presence.AMBIENT || presence == Presence.BLANK || presence == Presence.GOODNIGHT
+        val dark = presence.isDark
         animatePaletteTo(
             if (dark) Color.BLACK else colors.backdropTop,
             if (dark) Color.BLACK else colors.backdropBottom,
@@ -787,6 +809,7 @@ class NowPlayingActivity : Activity() {
             lyricsRemaining.text = ""
             progressBar.setFraction(0f, false)
             lyricsProgress.setFraction(0f, false)
+            if (presence == Presence.MINIMAL) showAodProgress("", "", 0f)
             return
         }
         val fraction = position.toFloat() / s.durationMs
@@ -795,6 +818,7 @@ class NowPlayingActivity : Activity() {
         progressBar.setFraction(fraction, false)
         elapsedView.text = elapsed
         remainingView.text = remaining
+        if (presence == Presence.MINIMAL) showAodProgress(elapsed, remaining, fraction)
         if (lyricsOpen) {
             lyricsProgress.setFraction(fraction, false)
             lyricsElapsed.text = elapsed
@@ -809,7 +833,16 @@ class NowPlayingActivity : Activity() {
     }
 
     private fun onVolumeChanged(level: Float) {
-        wakeUp()
+        // The sender repeats its volume whenever a stream starts; only a level that moved is someone at
+        // the controls, and only that wakes the screen.
+        val moved = shownVolume < 0f || abs(level - shownVolume) > VOLUME_MOVED
+        shownVolume = level
+        if (!moved) {
+            volumeBar.setFraction(level, false)
+            updateSpeakers(level)
+            return
+        }
+        wakeUp("volume")
         volumeBar.setFraction(level, true)
         volumeBar.setActive(true)
         updateSpeakers(level)
@@ -893,10 +926,14 @@ class NowPlayingActivity : Activity() {
             return true
         }
         if (latest.wokeDevice) ReceiverState.update { it.copy(wokeDevice = false) }
-        val wasDark = presence == Presence.AMBIENT || presence == Presence.BLANK
-        noteInteraction()
+        val wasDark = presence == Presence.MINIMAL || presence == Presence.BLACK || presence == Presence.BLANK
+        noteInteraction("key")
         if (wasDark && keyCode != KeyEvent.KEYCODE_BACK) return true // the first press only wakes the screen
         when (keyCode) {
+            KeyEvent.KEYCODE_MENU -> {
+                startActivity(Intent(this, MainActivity::class.java).putExtra(MainActivity.EXTRA_STAY, true))
+                return true
+            }
             KeyEvent.KEYCODE_DPAD_DOWN -> {
                 openLyrics()
                 return true
@@ -943,69 +980,92 @@ class NowPlayingActivity : Activity() {
 
     // ---------------------------------------------------------------- OLED care
 
-    private fun noteInteraction() {
+    /** Someone used the remote: back to full brightness, and the idle clock starts again. */
+    private fun noteInteraction(reason: String) {
         lastInteraction = SystemClock.elapsedRealtime()
-        if (presence != Presence.ACTIVE) setPresence(Presence.ACTIVE)
+        peekUntil = 0L
+        if (presence != Presence.ACTIVE) {
+            Log.i(TAG, "wake from $presence: $reason")
+            setPresence(Presence.ACTIVE)
+        }
     }
 
-    /** Brings the screen back to full brightness for something the viewer should see. */
-    private fun wakeUp() {
-        lastInteraction = SystemClock.elapsedRealtime()
-        if (presence != Presence.ACTIVE) setPresence(Presence.ACTIVE)
-    }
+    /** The viewer did something that should be seen (the volume moved): the same as touching the remote. */
+    private fun wakeUp(reason: String) = noteInteraction(reason)
+
+    private val holdsPreviewStage: Boolean get() = preview != null && preview != "oledcare"
 
     private fun evaluatePresence() {
         if (presence == Presence.GOODNIGHT) return
-        if (preview != null && presence != Presence.ACTIVE && SystemClock.elapsedRealtime() - startedAt < PREVIEW_HOLD_MS) return
         val now = SystemClock.elapsedRealtime()
+        if (holdsPreviewStage && presence != Presence.ACTIVE && now - startedAt < PREVIEW_HOLD_MS) return
         val idle = now - lastInteraction
         val pausedFor = if (!latest.playing && pausedSince > 0) now - pausedSince else 0L
-        val target = when {
-            pausedFor >= BLANK_AFTER_PAUSED_MS && idle >= AMBIENT_AFTER_MS -> Presence.BLANK
-            idle >= AMBIENT_AFTER_MS -> if (presence == Presence.BLANK) Presence.BLANK else Presence.AMBIENT
-            idle >= DIM_AFTER_MS -> Presence.DIM
-            else -> Presence.ACTIVE
+        var target = when (timeline.stageFor(idle, pausedFor)) {
+            PresenceTimeline.Stage.ACTIVE -> Presence.ACTIVE
+            PresenceTimeline.Stage.DIM -> Presence.DIM
+            PresenceTimeline.Stage.MINIMAL -> Presence.MINIMAL
+            PresenceTimeline.Stage.BLACK -> Presence.BLACK
+            PresenceTimeline.Stage.BLANK -> Presence.BLANK
         }
-        if (target != presence) setPresence(target)
+        if (target == Presence.DIM && now < peekUntil) target = Presence.ACTIVE
+        if (target != presence) {
+            Log.i(TAG, "$presence -> $target after ${idle / 1000}s idle, paused ${pausedFor / 1000}s")
+            setPresence(target)
+        }
+    }
+
+    private val Presence.isDark: Boolean
+        get() = this == Presence.MINIMAL || this == Presence.BLACK || this == Presence.BLANK || this == Presence.GOODNIGHT
+
+    private fun keepScreenOn(on: Boolean) {
+        if (on) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
 
     private fun setPresence(next: Presence) {
         if (next == presence) return
-        val leavingDark = (presence == Presence.AMBIENT || presence == Presence.BLANK || presence == Presence.GOODNIGHT) &&
-            (next == Presence.ACTIVE || next == Presence.DIM)
+        val leavingDark = presence.isDark && (next == Presence.ACTIVE || next == Presence.DIM)
         presence = next
         if (next != Presence.GOODNIGHT) hideGoodnight()
         when (next) {
             Presence.ACTIVE -> {
-                window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                keepScreenOn(true)
                 stage.animate().cancel()
                 stage.animate().alpha(1f).setDuration(if (leavingDark) 900 else 300).start()
-                hideAmbient()
+                hideAod()
             }
             Presence.DIM -> {
-                window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                keepScreenOn(true)
                 stage.animate().cancel()
                 stage.animate().alpha(DIM_ALPHA).setDuration(1500).start()
-                hideAmbient()
+                hideAod()
             }
-            Presence.AMBIENT -> {
-                window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            Presence.MINIMAL -> {
+                keepScreenOn(true)
                 stage.animate().cancel()
                 stage.animate().alpha(0f).setDuration(1800).start()
-                showAmbient()
+                showAod()
             }
-            Presence.BLANK -> {
-                // Pure black, and let the system sleep the screen by its own timer.
-                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            Presence.BLACK -> {
+                // Nothing lit at all, but the screen stays on: the TV keeps its picture signal and its sound.
+                keepScreenOn(true)
                 stage.animate().cancel()
                 stage.animate().alpha(0f).setDuration(1200).start()
-                hideAmbient()
+                hideAod()
+            }
+            Presence.BLANK -> {
+                // Pure black while the music is paused, and the system may put the display to sleep by its own timer.
+                keepScreenOn(false)
+                stage.animate().cancel()
+                stage.animate().alpha(0f).setDuration(1200).start()
+                hideAod()
             }
             Presence.GOODNIGHT -> {
-                window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                keepScreenOn(true)
                 stage.animate().cancel()
                 stage.animate().alpha(0f).setDuration(1500).start()
-                hideAmbient()
+                hideAod()
                 goodnightView.visibility = View.VISIBLE
                 goodnightView.animate().alpha(0.55f).setDuration(1500).start()
             }
@@ -1013,52 +1073,69 @@ class NowPlayingActivity : Activity() {
         applyArtworkColors(artworkColors, animate = true)
     }
 
-    private fun renderAmbient(s: ReceiverState.Snapshot) {
-        ambientTitle.text = displayTitle(s)
-        ambientArtist.text = s.artist
-        ambientArtist.visibility = if (s.artist.isBlank()) View.GONE else View.VISIBLE
+    private fun renderAod(s: ReceiverState.Snapshot) {
+        val title = displayTitle(s)
+        aodTitle.text = if (s.artist.isBlank()) title else "$title · ${s.artist}"
     }
 
-    private fun showAmbient() {
-        ambient.visibility = View.VISIBLE
-        ambient.animate().cancel()
-        ambient.animate().alpha(AMBIENT_ALPHA).setDuration(1800).start()
-        placeAmbient(animate = false)
+    private fun showAodProgress(elapsed: String, remaining: String, fraction: Float) {
+        if (aodElapsed.text.toString() != elapsed) aodElapsed.text = elapsed
+        if (aodRemaining.text.toString() != remaining) aodRemaining.text = remaining
+        aodBar.setFraction(fraction, false)
     }
 
-    private fun hideAmbient() {
-        ambient.animate().cancel()
-        ambient.animate().alpha(0f).setDuration(600).withEndAction {
-            if (presence != Presence.AMBIENT) ambient.visibility = View.GONE
+    private fun showAod() {
+        aod.visibility = View.VISIBLE
+        aod.animate().cancel()
+        aod.animate().alpha(AOD_ALPHA).setDuration(1800).start()
+        placeAod(animate = false)
+        updateProgress()
+    }
+
+    private fun hideAod() {
+        aod.animate().cancel()
+        aod.animate().alpha(0f).setDuration(600).withEndAction {
+            if (presence != Presence.MINIMAL) aod.visibility = View.GONE
         }.start()
     }
 
-    /** Where the ambient card is [aheadMs] from now: a slow loop that covers the whole screen. */
-    private fun ambientTarget(aheadMs: Long): Pair<Float, Float> {
+    /** Where the minimal display is [aheadMs] from now: a slow loop that covers the whole screen. */
+    private fun aodTarget(aheadMs: Long): Pair<Float, Float> {
         val t = (SystemClock.elapsedRealtime() + aheadMs) / 60000.0
         val unspecified = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
-        ambient.measure(unspecified, unspecified)
-        val maxX = (ambient.rootView.width - ambient.measuredWidth - dp(80)).coerceAtLeast(0)
-        val maxY = (ambient.rootView.height - ambient.measuredHeight - dp(80)).coerceAtLeast(0)
-        val x = dp(40) + maxX * (sin(2 * PI * t / AMBIENT_PERIOD_X_MIN) + 1) / 2
-        val y = dp(40) + maxY * (sin(2 * PI * t / AMBIENT_PERIOD_Y_MIN + 1.3) + 1) / 2
+        aod.measure(unspecified, unspecified)
+        val maxX = (aod.rootView.width - aod.measuredWidth - dp(80)).coerceAtLeast(0)
+        val maxY = (aod.rootView.height - aod.measuredHeight - dp(80)).coerceAtLeast(0)
+        val x = dp(40) + maxX * (sin(2 * PI * t / AOD_PERIOD_X_MIN) + 1) / 2
+        val y = dp(40) + maxY * (sin(2 * PI * t / AOD_PERIOD_Y_MIN + 1.3) + 1) / 2
         return Pair(x.toFloat(), y.toFloat())
     }
 
-    private fun placeAmbient(animate: Boolean) {
-        ambient.post {
-            val (x, y) = ambientTarget(if (animate) DRIFT_STEP_MS else 0L)
+    private fun placeAod(animate: Boolean) {
+        aod.post {
+            val (x, y) = aodTarget(if (animate) DRIFT_STEP_MS else 0L)
             if (animate) {
-                ambient.animate().translationX(x).translationY(y).setDuration(DRIFT_STEP_MS).setInterpolator(LinearInterpolator()).start()
+                aod.animate().translationX(x).translationY(y).setDuration(DRIFT_STEP_MS).setInterpolator(LinearInterpolator()).start()
             } else {
-                ambient.translationX = x
-                ambient.translationY = y
+                aod.translationX = x
+                aod.translationY = y
             }
         }
     }
 
     private fun drift() {
-        if (presence == Presence.AMBIENT) placeAmbient(animate = true)
+        if (presence == Presence.MINIMAL) placeAod(animate = true)
+    }
+
+    /** `--ei speed 60` runs the OLED care timeline sixty times faster in the `oledcare` preview. */
+    private fun applyPreviewSpeed(intent: Intent) {
+        if (preview == "oledcare") {
+            timeline = PresenceTimeline.STANDARD.faster(intent.getIntExtra(EXTRA_SPEED, 60))
+            presenceTickMs = 200L
+        } else {
+            timeline = PresenceTimeline.STANDARD
+            presenceTickMs = PRESENCE_TICK_MS
+        }
     }
 
     /** Moves the whole layout a few pixels along a very slow loop, so no pixel stays lit for hours. */
@@ -1109,8 +1186,9 @@ class NowPlayingActivity : Activity() {
 
     private fun applyPreviewMode(mode: String) {
         when (mode) {
-            "ambient" -> setPresence(Presence.AMBIENT)
+            "ambient", "minimal" -> setPresence(Presence.MINIMAL)
             "dim" -> setPresence(Presence.DIM)
+            "black" -> setPresence(Presence.BLACK)
             "blank" -> setPresence(Presence.BLANK)
             "goodnight" -> startGoodnight(5 * 60_000L)
             "lyrics" -> handler.postDelayed({ openLyrics() }, 700)
@@ -1121,6 +1199,8 @@ class NowPlayingActivity : Activity() {
 
     companion object {
         const val EXTRA_PREVIEW = "preview"
+        const val EXTRA_SPEED = "speed"
+        private const val TAG = "AirPlayTV-Presence"
 
         private const val NEUTRAL_TOP = 0xFF17171A.toInt()
         private const val NEUTRAL_BOTTOM = 0xFF0B0B0D.toInt()
@@ -1130,7 +1210,10 @@ class NowPlayingActivity : Activity() {
 
         private const val ART_DP = 380
         private const val ART_RADIUS_DP = 18
-        private const val AMBIENT_ART_DP = 88
+        private const val AOD_WIDTH_DP = 320
+        private const val AOD_TEXT = 0xFF8E8E93.toInt()
+        private const val AOD_FILL = 0xFF8E8E93.toInt()
+        private const val AOD_TRACK = 0xFF2C2C2E.toInt()
         private const val PAUSED_ART_SCALE = 0.9f
 
         private const val TICK_MS = 250L
@@ -1138,6 +1221,7 @@ class NowPlayingActivity : Activity() {
         private const val PREVIEW_HOLD_MS = 120_000L
         private const val LYRICS_LEAD_MS = 150L
         private const val VOLUME_SETTLE_MS = 1400L
+        private const val VOLUME_MOVED = 0.002f
         private const val HINT_MS = 7000L
 
         private const val TEXT_SHIFT_DP = 28f
@@ -1151,18 +1235,16 @@ class NowPlayingActivity : Activity() {
         private const val ARTWORK_GRACE_MS = 1200L
 
         // Burn-in care: when each stage starts, and how the layout drifts.
-        private const val DIM_AFTER_MS = 90_000L
-        private const val AMBIENT_AFTER_MS = 5 * 60_000L
-        private const val BLANK_AFTER_PAUSED_MS = 15 * 60_000L
-        private const val DIM_ALPHA = 0.45f
-        private const val AMBIENT_ALPHA = 0.6f
+        private const val PEEK_MS = 8000L
+        private const val DIM_ALPHA = 0.35f
+        private const val AOD_ALPHA = 0.7f
         private const val ORBIT_STEP_MS = 10_000L
         private const val ORBIT_X_DP = 22f
         private const val ORBIT_Y_DP = 14f
         private const val ORBIT_PERIOD_X_MIN = 11.0
         private const val ORBIT_PERIOD_Y_MIN = 7.0
         private const val DRIFT_STEP_MS = 20_000L
-        private const val AMBIENT_PERIOD_X_MIN = 2.9
-        private const val AMBIENT_PERIOD_Y_MIN = 4.1
+        private const val AOD_PERIOD_X_MIN = 8.0
+        private const val AOD_PERIOD_Y_MIN = 11.0
     }
 }
