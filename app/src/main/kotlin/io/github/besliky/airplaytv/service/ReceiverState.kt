@@ -1,5 +1,6 @@
 package io.github.besliky.airplaytv.service
 
+import android.graphics.Bitmap
 import android.os.Handler
 import android.os.Looper
 import java.util.concurrent.CopyOnWriteArraySet
@@ -24,6 +25,14 @@ object ReceiverState {
         val audioActive: Boolean = false,
         val pin: String? = null,
         val error: String? = null,
+        val title: String = "",
+        val artist: String = "",
+        val album: String = "",
+        val artwork: Bitmap? = null,
+        /** Track length and position at [positionAtMs] (SystemClock.elapsedRealtime), or -1 if unknown. */
+        val durationMs: Long = -1,
+        val positionMs: Long = -1,
+        val positionAtMs: Long = 0,
     )
 
     private val handler = Handler(Looper.getMainLooper())

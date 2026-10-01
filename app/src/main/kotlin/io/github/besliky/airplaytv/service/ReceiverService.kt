@@ -7,12 +7,14 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.content.pm.ServiceInfo
+import android.graphics.BitmapFactory
 import android.hardware.display.DisplayManager
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import android.os.PowerManager
 import android.provider.Settings.canDrawOverlays
 import android.view.Display
@@ -29,6 +31,7 @@ import io.github.besliky.airplaytv.core.DecoderSelector
 import io.github.besliky.airplaytv.core.NativeBridge
 import io.github.besliky.airplaytv.service.ReceiverState.Status
 import io.github.besliky.airplaytv.ui.MirrorActivity
+import io.github.besliky.airplaytv.ui.NowPlayingActivity
 
 /**
  * Headless AirPlay receiver. Runs as a foreground service for as long as AirPlay is
@@ -55,6 +58,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
     private var multicastLock: WifiManager.MulticastLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private var audioSampleRate = 44100
     private var screenReceiverRegistered = false
 
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key -> onSettingChanged(key) }
@@ -390,6 +394,19 @@ class ReceiverService : Service(), NativeBridge.Listener {
         }
     }
 
+    /** Audio-only senders (music apps): show what is playing, like a TV with built-in AirPlay. */
+    private fun showNowPlaying() {
+        if (ReceiverState.current.videoActive) return
+        wakeDisplay()
+        val intent = Intent(this, NowPlayingActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        try {
+            startActivity(intent)
+        } catch (e: RuntimeException) {
+            Log.w(SESSION, "cannot open the now playing screen", e)
+        }
+    }
+
     // ---- native events (main thread) ----
 
     override fun onSessionStarted(clientName: String, clientModel: String) {
@@ -411,7 +428,8 @@ class ReceiverService : Service(), NativeBridge.Listener {
         Notifications.cancelSessionPrompt(this)
         ReceiverState.update {
             it.copy(clientName = null, clientModel = null, videoActive = false, audioActive = false,
-                videoWidth = 0, videoHeight = 0, pin = null)
+                videoWidth = 0, videoHeight = 0, pin = null, title = "", artist = "", album = "",
+                artwork = null, durationMs = -1, positionMs = -1)
         }
         if (restartPending) restartReceiver() else updateIdleState()
     }
@@ -442,7 +460,9 @@ class ReceiverService : Service(), NativeBridge.Listener {
 
     override fun onAudioStarted(sampleRate: Int, channels: Int, lowLatency: Boolean) {
         audio.start(sampleRate, channels, lowLatency)
+        if (sampleRate > 0) audioSampleRate = sampleRate
         ReceiverState.update { it.copy(audioActive = true) }
+        showNowPlaying()
     }
 
     override fun onAudioStopped() {
@@ -452,6 +472,49 @@ class ReceiverService : Service(), NativeBridge.Listener {
 
     override fun onVolume(gain: Float) {
         audio.setVolume(gain)
+    }
+
+    override fun onTrackInfo(title: String, artist: String, album: String) {
+        ReceiverState.update {
+            val changed = it.title != title || it.artist != artist || it.album != album
+            // A new track invalidates the old cover and position; the sender pushes them again.
+            if (changed) {
+                it.copy(title = title, artist = artist, album = album, artwork = null, durationMs = -1, positionMs = -1)
+            } else {
+                it
+            }
+        }
+    }
+
+    override fun onArtwork(data: ByteArray) {
+        val bitmap = decodeArtwork(data) ?: return
+        ReceiverState.update { it.copy(artwork = bitmap) }
+    }
+
+    override fun onProgress(start: Long, current: Long, end: Long) {
+        // RTP timestamps wrap at 32 bits; differences are what matter.
+        val rate = audioSampleRate.toLong().coerceAtLeast(1)
+        val durationMs = ((end - start) and 0xFFFFFFFFL) * 1000 / rate
+        val positionMs = ((current - start) and 0xFFFFFFFFL) * 1000 / rate
+        if (durationMs <= 0) return
+        ReceiverState.update {
+            it.copy(durationMs = durationMs, positionMs = positionMs.coerceAtMost(durationMs),
+                positionAtMs = SystemClock.elapsedRealtime())
+        }
+    }
+
+    /** Decodes cover art, shrinking it so a large JPEG cannot exhaust memory on a 1.7 GB stick. */
+    private fun decodeArtwork(data: ByteArray): android.graphics.Bitmap? {
+        return try {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(data, 0, data.size, bounds)
+            var sample = 1
+            while (bounds.outWidth / sample > 1024 || bounds.outHeight / sample > 1024) sample *= 2
+            BitmapFactory.decodeByteArray(data, 0, data.size, BitmapFactory.Options().apply { inSampleSize = sample })
+        } catch (e: RuntimeException) {
+            Log.w(SESSION, "cannot decode artwork", e)
+            null
+        }
     }
 
     companion object {

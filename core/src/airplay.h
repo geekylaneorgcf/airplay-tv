@@ -42,6 +42,12 @@ typedef struct {
     void (*pin_display)(void *ctx, const char *pin);
     /* A sender completed PIN pairing and should be remembered. */
     void (*client_paired)(void *ctx, const char *client_key_b64, const char *client_name);
+    /* Track info pushed by the sender (DMAP). Strings are UTF-8, possibly empty. Optional. */
+    void (*track_info)(void *ctx, const char *title, const char *artist, const char *album);
+    /* Cover art as an encoded image (JPEG or PNG); only valid during the call. Optional. */
+    void (*artwork)(void *ctx, const uint8_t *data, size_t len);
+    /* Playback position in RTP timestamp units: start, current, end. Optional. */
+    void (*progress)(void *ctx, uint32_t start, uint32_t current, uint32_t end);
 } airplay_events_t;
 
 typedef struct {

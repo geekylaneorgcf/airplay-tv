@@ -1009,14 +1009,79 @@ static void handle_get_parameter(airplay_server_t *s, conn_t *c, const rtsp_requ
     }
 }
 
+/* DMAP items are a 4 byte ASCII tag, a big-endian 32 bit length and the payload. */
+typedef struct {
+    char title[256];
+    char artist[256];
+    char album[256];
+} dmap_track_t;
+
+static uint32_t dmap_be32(const uint8_t *p) {
+    return ((uint32_t) p[0] << 24) | ((uint32_t) p[1] << 16) | ((uint32_t) p[2] << 8) | (uint32_t) p[3];
+}
+
+static void dmap_copy_text(char *dst, size_t cap, const uint8_t *src, size_t len) {
+    size_t n = MIN(len, cap - 1);
+    memcpy(dst, src, n);
+    if (len > n) {
+        /* Do not leave half of a multi-byte UTF-8 sequence at the cut. */
+        while (n > 0 && ((uint8_t) dst[n - 1] & 0xC0) == 0x80) {
+            n--;
+        }
+        if (n > 0 && (uint8_t) dst[n - 1] >= 0xC0) {
+            n--;
+        }
+    }
+    dst[n] = '\0';
+}
+
+static void dmap_scan(const uint8_t *data, size_t len, int depth, dmap_track_t *out) {
+    size_t pos = 0;
+    while (len - pos >= 8) {
+        const uint8_t *tag = data + pos;
+        size_t item = dmap_be32(data + pos + 4);
+        pos += 8;
+        if (item > len - pos) {
+            break;
+        }
+        if (memcmp(tag, "minm", 4) == 0) {
+            dmap_copy_text(out->title, sizeof(out->title), data + pos, item);
+        } else if (memcmp(tag, "asar", 4) == 0) {
+            dmap_copy_text(out->artist, sizeof(out->artist), data + pos, item);
+        } else if (memcmp(tag, "asal", 4) == 0) {
+            dmap_copy_text(out->album, sizeof(out->album), data + pos, item);
+        } else if (depth < 4 && memcmp(tag, "mlit", 4) == 0) {
+            dmap_scan(data + pos, item, depth + 1, out);
+        }
+        pos += item;
+    }
+}
+
 static void handle_set_parameter(airplay_server_t *s, conn_t *c, const rtsp_request_t *req, rtsp_reply_t *reply) {
     const char *ct = rtsp_header(req, "Content-Type");
     if (!ct) {
         rtsp_reply_status(reply, 451, "Parameter Not Understood");
         return;
     }
+    if (req->body && req->body_len > 0) {
+        if (str_ieq(ct, "application/x-dmap-tagged")) {
+            if (s->ev.track_info) {
+                dmap_track_t track;
+                memset(&track, 0, sizeof(track));
+                dmap_scan(req->body, req->body_len, 0, &track);
+                s->ev.track_info(s->ev.ctx, track.title, track.artist, track.album);
+            }
+            return;
+        }
+        if (strncmp(ct, "image/", 6) == 0) {
+            if (s->ev.artwork) {
+                s->ev.artwork(s->ev.ctx, req->body, req->body_len);
+            }
+            return;
+        }
+    }
     if (!str_ieq(ct, CT_PARAMS) || !req->body) {
-        return; /* artwork and DMAP metadata are accepted and ignored */
+        return;
     }
     char text[128];
     size_t n = MIN(req->body_len, sizeof(text) - 1);
@@ -1036,6 +1101,11 @@ static void handle_set_parameter(airplay_server_t *s, conn_t *c, const rtsp_requ
                 s->media->audio_volume(s->media_ctx, db);
             }
             LOG_D(AUDIO, "volume %.1f dB", (double) db);
+        }
+    } else if (strncmp(text, "progress: ", 10) == 0 && s->ev.progress) {
+        unsigned long start = 0, current = 0, end = 0;
+        if (sscanf(text + 10, "%lu/%lu/%lu", &start, &current, &end) == 3) {
+            s->ev.progress(s->ev.ctx, (uint32_t) start, (uint32_t) current, (uint32_t) end);
         }
     }
 }

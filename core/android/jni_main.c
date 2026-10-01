@@ -50,6 +50,9 @@ static struct {
     jmethodID audio_started;
     jmethodID audio_stopped;
     jmethodID volume;
+    jmethodID track_info;
+    jmethodID artwork;
+    jmethodID progress;
 } g_cb;
 
 static pthread_mutex_t g_server_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -202,6 +205,54 @@ static void ev_client_paired(void *ctx, const char *key, const char *name) {
     (*env)->DeleteLocalRef(env, n);
 }
 
+static void ev_track_info(void *ctx, const char *title, const char *artist, const char *album) {
+    (void) ctx;
+    JNIEnv *env = get_env();
+    if (!env) {
+        return;
+    }
+    jbyteArray t = utf8_bytes(env, title);
+    jbyteArray a = utf8_bytes(env, artist);
+    jbyteArray l = utf8_bytes(env, album);
+    (*env)->CallStaticVoidMethod(env, g_bridge, g_cb.track_info, t, a, l);
+    check_exception(env);
+    if (t) {
+        (*env)->DeleteLocalRef(env, t);
+    }
+    if (a) {
+        (*env)->DeleteLocalRef(env, a);
+    }
+    if (l) {
+        (*env)->DeleteLocalRef(env, l);
+    }
+}
+
+static void ev_artwork(void *ctx, const uint8_t *data, size_t len) {
+    (void) ctx;
+    JNIEnv *env = get_env();
+    if (!env || !data || len == 0 || len > 0x7fffffff) {
+        return;
+    }
+    jbyteArray arr = (*env)->NewByteArray(env, (jsize) len);
+    if (!arr) {
+        check_exception(env);
+        return;
+    }
+    (*env)->SetByteArrayRegion(env, arr, 0, (jsize) len, (const jbyte *) data);
+    (*env)->CallStaticVoidMethod(env, g_bridge, g_cb.artwork, arr);
+    check_exception(env);
+    (*env)->DeleteLocalRef(env, arr);
+}
+
+static void ev_progress(void *ctx, uint32_t start, uint32_t current, uint32_t end) {
+    (void) ctx;
+    JNIEnv *env = get_env();
+    if (env) {
+        (*env)->CallStaticVoidMethod(env, g_bridge, g_cb.progress, (jlong) start, (jlong) current, (jlong) end);
+        check_exception(env);
+    }
+}
+
 /* ------------------------------------------------------------------------- */
 /* media sink wiring                                                          */
 
@@ -337,6 +388,9 @@ static jint JNICALL n_start(JNIEnv *env, jclass cls, jbyteArray name, jbyteArray
         .session_ended = ev_session_ended,
         .pin_display = ev_pin,
         .client_paired = ev_client_paired,
+        .track_info = ev_track_info,
+        .artwork = ev_artwork,
+        .progress = ev_progress,
     };
 
     pthread_mutex_lock(&g_server_lock);
@@ -589,6 +643,9 @@ JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *reserved) {
     g_cb.audio_started = (*env)->GetStaticMethodID(env, g_bridge, "onAudioStarted", "(IIZ)V");
     g_cb.audio_stopped = (*env)->GetStaticMethodID(env, g_bridge, "onAudioStopped", "()V");
     g_cb.volume = (*env)->GetStaticMethodID(env, g_bridge, "onVolume", "(F)V");
+    g_cb.track_info = (*env)->GetStaticMethodID(env, g_bridge, "onTrackInfo", "([B[B[B)V");
+    g_cb.artwork = (*env)->GetStaticMethodID(env, g_bridge, "onArtwork", "([B)V");
+    g_cb.progress = (*env)->GetStaticMethodID(env, g_bridge, "onProgress", "(JJJ)V");
     if ((*env)->ExceptionCheck(env)) {
         (*env)->ExceptionClear(env);
         return JNI_ERR;

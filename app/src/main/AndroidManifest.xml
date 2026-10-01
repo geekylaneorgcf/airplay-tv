@@ -50,6 +50,14 @@
             android:exported="false" />
 
         <activity
+            android:name=".ui.NowPlayingActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:taskAffinity=".nowplaying"
+            android:theme="@style/Theme.AirPlayTV" />
+        <activity
             android:name=".ui.MirrorActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density"
             android:excludeFromRecents="true"

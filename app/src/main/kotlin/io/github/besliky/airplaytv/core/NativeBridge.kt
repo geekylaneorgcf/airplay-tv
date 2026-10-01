@@ -25,6 +25,11 @@ object NativeBridge {
         fun onAudioStarted(sampleRate: Int, channels: Int, lowLatency: Boolean)
         fun onAudioStopped()
         fun onVolume(gain: Float)
+        fun onTrackInfo(title: String, artist: String, album: String)
+        fun onArtwork(data: ByteArray)
+
+        /** Position in RTP timestamp units (unsigned 32 bit, widened to Long). */
+        fun onProgress(start: Long, current: Long, end: Long)
     }
 
     /** Decoder low-latency options, see video_decoder.h. */
@@ -99,6 +104,23 @@ object NativeBridge {
 
     @JvmStatic
     fun onVolume(gain: Float) = post { it.onVolume(gain) }
+
+    @JvmStatic
+    fun onTrackInfo(title: ByteArray?, artist: ByteArray?, album: ByteArray?) {
+        val t = title.utf8()
+        val a = artist.utf8()
+        val l = album.utf8()
+        post { it.onTrackInfo(t, a, l) }
+    }
+
+    @JvmStatic
+    fun onArtwork(data: ByteArray?) {
+        if (data == null || data.isEmpty()) return
+        post { it.onArtwork(data) }
+    }
+
+    @JvmStatic
+    fun onProgress(start: Long, current: Long, end: Long) = post { it.onProgress(start, current, end) }
 
     // ---- native methods ----
 
