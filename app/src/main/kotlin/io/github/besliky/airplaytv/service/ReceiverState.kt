@@ -46,6 +46,8 @@ object ReceiverState {
         val artColors: ArtworkColors? = null,
         val lyricsState: LyricsState = LyricsState.OFF,
         val lyrics: Lyrics? = null,
+        /** AirPlay turned the screen on for this session and nobody has touched the remote since. */
+        val wokeDevice: Boolean = false,
     )
 
     /** OFF: the feature is off. LOADING: a lookup is running. FOUND/NOT_FOUND: its result. */

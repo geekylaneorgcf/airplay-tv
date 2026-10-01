@@ -10,6 +10,7 @@ import android.graphics.Color
 import android.graphics.Outline
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -30,10 +31,12 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import io.github.besliky.airplaytv.R
+import io.github.besliky.airplaytv.Settings
 import io.github.besliky.airplaytv.service.ArtworkColors
 import io.github.besliky.airplaytv.service.DacpClient
 import io.github.besliky.airplaytv.service.ReceiverState
 import io.github.besliky.airplaytv.service.RemoteControl
+import io.github.besliky.airplaytv.service.SleepService
 import java.util.Locale
 import kotlin.math.PI
 import kotlin.math.sin
@@ -53,9 +56,11 @@ import kotlin.math.sin
  */
 class NowPlayingActivity : Activity() {
 
-    private enum class Presence { ACTIVE, DIM, AMBIENT, BLANK }
+    private enum class Presence { ACTIVE, DIM, AMBIENT, BLANK, GOODNIGHT }
 
     private val handler = Handler(Looper.getMainLooper())
+    private lateinit var settings: Settings
+    private var goodnightEnd = 0L
     private var latest = ReceiverState.Snapshot()
     private var rendered = false
     private var lastTrackSeq = 0
@@ -112,6 +117,7 @@ class NowPlayingActivity : Activity() {
     private lateinit var ambientArt: ImageView
     private lateinit var ambientTitle: TextView
     private lateinit var ambientArtist: TextView
+    private lateinit var goodnightView: TextView
 
     // ---- colours ----
     private var shownTop = NEUTRAL_TOP
@@ -174,6 +180,7 @@ class NowPlayingActivity : Activity() {
             )
         }
 
+        settings = Settings(this)
         preview = intent.getStringExtra(EXTRA_PREVIEW)
         preview?.let { PreviewMode.begin(it) }
 
@@ -467,6 +474,12 @@ class NowPlayingActivity : Activity() {
         }
         root.addView(orbitLayer, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         root.addView(ambient, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        goodnightView = label(22f, 0xFF8E8E93.toInt(), light).apply {
+            alpha = 0f
+            visibility = View.GONE
+            gravity = Gravity.CENTER
+        }
+        root.addView(goodnightView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
         applyPalette()
         return root
     }
@@ -494,10 +507,22 @@ class NowPlayingActivity : Activity() {
     private fun render(s: ReceiverState.Snapshot) {
         val previous = latest
         latest = s
-        if (s.status != ReceiverState.Status.CONNECTED || s.videoActive) {
+        if (s.videoActive) {
             finish()
             return
         }
+        if (s.status != ReceiverState.Status.CONNECTED) {
+            if (presence == Presence.GOODNIGHT) return // already counting down to sleep
+            // The music is over. If AirPlay woke the TV and nobody used the remote, keep a black screen
+            // for a while and then put it back to sleep; otherwise just close.
+            if (s.wokeDevice && settings.sleepAfterMinutes > 0 && SleepService.isEnabled) {
+                startGoodnight(settings.sleepAfterMinutes * 60_000L)
+            } else {
+                finish()
+            }
+            return
+        }
+        if (presence == Presence.GOODNIGHT) setPresence(Presence.ACTIVE) // a new session came back
         val first = !rendered
         rendered = true
 
@@ -670,7 +695,7 @@ class NowPlayingActivity : Activity() {
     /** Moves the backdrop and the bars to [colors]; on black (ambient/blank) the backdrop stays pure black. */
     private fun applyArtworkColors(colors: ArtworkColors, animate: Boolean) {
         artworkColors = colors
-        val dark = presence == Presence.AMBIENT || presence == Presence.BLANK
+        val dark = presence == Presence.AMBIENT || presence == Presence.BLANK || presence == Presence.GOODNIGHT
         animatePaletteTo(
             if (dark) Color.BLACK else colors.backdropTop,
             if (dark) Color.BLACK else colors.backdropBottom,
@@ -857,6 +882,13 @@ class NowPlayingActivity : Activity() {
     // ---------------------------------------------------------------- keys
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (presence == Presence.GOODNIGHT) {
+            // Someone is here after all: stay awake and go back to the home screen.
+            ReceiverState.update { it.copy(wokeDevice = false) }
+            finish()
+            return true
+        }
+        if (latest.wokeDevice) ReceiverState.update { it.copy(wokeDevice = false) }
         val wasDark = presence == Presence.AMBIENT || presence == Presence.BLANK
         noteInteraction()
         if (wasDark && keyCode != KeyEvent.KEYCODE_BACK) return true // the first press only wakes the screen
@@ -919,6 +951,7 @@ class NowPlayingActivity : Activity() {
     }
 
     private fun evaluatePresence() {
+        if (presence == Presence.GOODNIGHT) return
         if (preview != null && presence != Presence.ACTIVE && SystemClock.elapsedRealtime() - startedAt < PREVIEW_HOLD_MS) return
         val now = SystemClock.elapsedRealtime()
         val idle = now - lastInteraction
@@ -934,9 +967,10 @@ class NowPlayingActivity : Activity() {
 
     private fun setPresence(next: Presence) {
         if (next == presence) return
-        val leavingDark = (presence == Presence.AMBIENT || presence == Presence.BLANK) &&
+        val leavingDark = (presence == Presence.AMBIENT || presence == Presence.BLANK || presence == Presence.GOODNIGHT) &&
             (next == Presence.ACTIVE || next == Presence.DIM)
         presence = next
+        if (next != Presence.GOODNIGHT) hideGoodnight()
         when (next) {
             Presence.ACTIVE -> {
                 window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -962,6 +996,14 @@ class NowPlayingActivity : Activity() {
                 stage.animate().cancel()
                 stage.animate().alpha(0f).setDuration(1200).start()
                 hideAmbient()
+            }
+            Presence.GOODNIGHT -> {
+                window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                stage.animate().cancel()
+                stage.animate().alpha(0f).setDuration(1500).start()
+                hideAmbient()
+                goodnightView.visibility = View.VISIBLE
+                goodnightView.animate().alpha(0.55f).setDuration(1500).start()
             }
         }
         applyArtworkColors(artworkColors, animate = true)
@@ -1023,6 +1065,42 @@ class NowPlayingActivity : Activity() {
         orbitLayer.animate().translationX(x).translationY(y).setDuration(ORBIT_STEP_MS).setInterpolator(LinearInterpolator()).start()
     }
 
+    // ---------------------------------------------------------------- sleep after music
+
+    private val goodnightTick = object : Runnable {
+        override fun run() {
+            val left = goodnightEnd - SystemClock.elapsedRealtime()
+            if (left <= 0) {
+                finishGoodnight()
+                return
+            }
+            goodnightView.text = getString(R.string.goodnight_countdown, formatTime(left + 999))
+            handler.postDelayed(this, 1000)
+        }
+    }
+
+    private fun startGoodnight(durationMs: Long) {
+        goodnightEnd = SystemClock.elapsedRealtime() + durationMs
+        setPresence(Presence.GOODNIGHT)
+        handler.removeCallbacks(goodnightTick)
+        handler.post(goodnightTick)
+    }
+
+    private fun hideGoodnight() {
+        handler.removeCallbacks(goodnightTick)
+        goodnightView.animate().cancel()
+        goodnightView.animate().alpha(0f).setDuration(300).withEndAction {
+            if (presence != Presence.GOODNIGHT) goodnightView.visibility = View.GONE
+        }.start()
+    }
+
+    /** The time is up: turn the screen off, unless something else is playing music. */
+    private fun finishGoodnight() {
+        val am = getSystemService(AUDIO_SERVICE) as AudioManager
+        if (preview == null && !am.isMusicActive) SleepService.sleepNow()
+        finish()
+    }
+
     // ---------------------------------------------------------------- preview (development)
 
     private fun applyPreviewMode(mode: String) {
@@ -1030,6 +1108,7 @@ class NowPlayingActivity : Activity() {
             "ambient" -> setPresence(Presence.AMBIENT)
             "dim" -> setPresence(Presence.DIM)
             "blank" -> setPresence(Presence.BLANK)
+            "goodnight" -> startGoodnight(5 * 60_000L)
             "lyrics" -> handler.postDelayed({ openLyrics() }, 700)
         }
     }

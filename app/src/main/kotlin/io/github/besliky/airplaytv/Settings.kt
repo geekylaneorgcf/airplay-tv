@@ -28,6 +28,11 @@ class Settings(context: Context) {
         get() = prefs.getBoolean(KEY_LYRICS, false)
         set(value) = prefs.edit().putBoolean(KEY_LYRICS, value).apply()
 
+    /** Minutes to wait after the music stops before the TV is put back to sleep; 0 = never. Only used when AirPlay woke it. */
+    var sleepAfterMinutes: Int
+        get() = prefs.getInt(KEY_SLEEP, 0).let { if (it in SLEEP_CHOICES) it else 0 }
+        set(value) = prefs.edit().putInt(KEY_SLEEP, if (value in SLEEP_CHOICES) value else 0).apply()
+
     var enabled: Boolean
         get() = prefs.getBoolean(KEY_ENABLED, true)
         set(value) = prefs.edit().putBoolean(KEY_ENABLED, value).apply()
@@ -77,6 +82,10 @@ class Settings(context: Context) {
 
         const val KEY_NAME = "device_name"
         const val KEY_LYRICS = "lyrics"
+        const val KEY_SLEEP = "sleep_after_minutes"
+
+        /** The choices offered for Sleep After Music; 0 is off. */
+        val SLEEP_CHOICES = listOf(0, 2, 5, 10, 20)
         const val KEY_ENABLED = "enabled"
         const val KEY_PIN = "require_pin"
         const val KEY_AUTOSTART = "start_automatically"

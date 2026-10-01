@@ -525,6 +525,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
     private fun wakeDisplay() {
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         if (pm.isInteractive) return
+        ReceiverState.update { it.copy(wokeDevice = true) }
         try {
             pm.newWakeLock(
                 PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
@@ -570,6 +571,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
         Log.i(SESSION, "session started ($clientModel)")
         // Audio-only senders (music apps) never open the playback screen, so wake the display
         // here too; on a TV with HDMI-CEC this switches the TV on so the audio is heard.
+        ReceiverState.update { it.copy(wokeDevice = false) }
         wakeDisplay()
         acquireSessionLocks()
         startVolumeWatch()

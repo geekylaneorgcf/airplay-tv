@@ -14,6 +14,7 @@ import io.github.besliky.airplaytv.Settings
 import io.github.besliky.airplaytv.service.ReceiverService
 import io.github.besliky.airplaytv.service.ReceiverState
 import io.github.besliky.airplaytv.service.ReceiverState.Status
+import io.github.besliky.airplaytv.service.SleepService
 
 /** Home screen: receiver status and the basic settings. */
 class MainActivity : SettingsPage() {
@@ -26,6 +27,7 @@ class MainActivity : SettingsPage() {
     private lateinit var infoRow: Row
     private lateinit var autoOpenRow: Row
     private lateinit var lyricsRow: Row
+    private lateinit var sleepRow: Row
 
     private val stateListener: (ReceiverState.Snapshot) -> Unit = { render(it) }
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> bindRows() }
@@ -51,6 +53,7 @@ class MainActivity : SettingsPage() {
         }
         autoOpenRow = addRow(getString(R.string.setting_auto_open)) { requestAutoOpen() }
         lyricsRow = addRow(getString(R.string.setting_lyrics)) { toggleLyrics() }
+        sleepRow = addRow(getString(R.string.setting_sleep)) { cycleSleep() }
         addRow(getString(R.string.setting_advanced)) {
             startActivity(Intent(this, AdvancedActivity::class.java))
         }.navigates(true)
@@ -73,6 +76,25 @@ class MainActivity : SettingsPage() {
         val mode = intent.getStringExtra(NowPlayingActivity.EXTRA_PREVIEW) ?: return
         intent.removeExtra(NowPlayingActivity.EXTRA_PREVIEW)
         startActivity(Intent(this, NowPlayingActivity::class.java).putExtra(NowPlayingActivity.EXTRA_PREVIEW, mode))
+    }
+
+    private fun sleepValue(): String {
+        val minutes = settings.sleepAfterMinutes
+        return when {
+            minutes == 0 -> getString(R.string.value_off)
+            !SleepService.isEnabled -> getString(R.string.value_needs_setup)
+            else -> getString(R.string.value_minutes, minutes)
+        }
+    }
+
+    private fun cycleSleep() {
+        val choices = Settings.SLEEP_CHOICES
+        val next = choices[(choices.indexOf(settings.sleepAfterMinutes) + 1) % choices.size]
+        settings.sleepAfterMinutes = next
+        if (next > 0 && !SleepService.isEnabled) {
+            val component = "$packageName/${SleepService::class.java.name}"
+            Dialogs.message(this, getString(R.string.dialog_sleep_title), getString(R.string.dialog_sleep_message, component))
+        }
     }
 
     private fun toggleLyrics() {
@@ -105,6 +127,7 @@ class MainActivity : SettingsPage() {
         pinRow.value(onOff(settings.requirePin))
         autostartRow.value(onOff(settings.startAutomatically))
         lyricsRow.value(onOff(settings.lyricsEnabled))
+        sleepRow.value(sleepValue())
         infoRow.value(onOff(settings.showConnectionInfo))
         autoOpenRow.visible(Build.VERSION.SDK_INT >= 29)
             .value(getString(if (canOpenAutomatically()) R.string.value_allowed else R.string.value_allow))

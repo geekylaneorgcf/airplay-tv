@@ -74,6 +74,14 @@
     <string name="setting_lyrics">Lyrics</string>
     <string name="dialog_lyrics_title">Lyrics</string>
     <string name="dialog_lyrics_message">With Lyrics on, the title and artist of the song that is playing are sent to lrclib.net to find its lyrics. Nothing else leaves this TV.\n\nWhile a song plays, press Down on the remote to see the lyrics and Up or Back to close them.</string>
+    <string name="setting_sleep">Sleep After Music</string>
+    <string name="value_minutes">%1$d min</string>
+    <string name="value_needs_setup">Needs setup</string>
+    <string name="dialog_sleep_title">Sleep after music</string>
+    <string name="dialog_sleep_message">When AirPlay turns this TV on, it can turn itself off again a few minutes after the music stops. Android only allows that through an accessibility service, so it needs a one-time setup from a computer:\n\nadb shell settings put secure enabled_accessibility_services %1$s\nadb shell settings put secure accessibility_enabled 1\n\nIf other accessibility services are already on, add this one to the colon-separated list instead. The service does not read the screen.</string>
+    <string name="sleep_service_label" translatable="false">AirPlay TV sleep</string>
+    <string name="sleep_service_description">Lets AirPlay TV turn the screen off a few minutes after the music stops. It does not read the screen or see what you do.</string>
+    <string name="goodnight_countdown">Turning off in %1$s</string>
     <string name="lyrics_off">Lyrics are off</string>
     <string name="lyrics_loading">Looking for lyrics…</string>
     <string name="lyrics_not_found">No lyrics found</string>
