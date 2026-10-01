@@ -9,6 +9,7 @@ import android.content.SharedPreferences
 import android.content.pm.ServiceInfo
 import android.graphics.BitmapFactory
 import android.hardware.display.DisplayManager
+import android.media.AudioManager
 import android.media.MediaMetadata
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
@@ -65,6 +66,8 @@ class ReceiverService : Service(), NativeBridge.Listener {
     private var wakeLock: PowerManager.WakeLock? = null
     private var audioSampleRate = 44100
     private var appliedLevel = -1f
+    private var savedStreamIndex = -1
+    private var levelBeforeMute = 1f
 
     /** Applies the volume set with the TV remote to the audio output and remembers it. */
     private val outputListener: (ReceiverState.Snapshot) -> Unit = { s ->
@@ -73,6 +76,81 @@ class ReceiverService : Service(), NativeBridge.Listener {
             audio.setTrim(levelToGain(s.outputLevel))
             settings.outputLevel = s.outputLevel
         }
+    }
+
+    /**
+     * Fire OS handles the remote's volume and mute keys itself and never lets an app see them, but
+     * it moves the system music volume, and on HDMI that changes only a number: the audio stays at
+     * full scale because the stick expects the TV to do the volume (LG ignores it). So treat that
+     * number as the input: each step away from the middle is one step of the receiver's own volume,
+     * which is applied for real, and the system number is put back in the middle so the buttons
+     * work at both ends. It is restored when the session ends.
+     */
+    private val volumeWatch = object : Runnable {
+        override fun run() {
+            watchSystemVolume()
+            handler.postDelayed(this, VOLUME_WATCH_MS)
+        }
+    }
+
+    private fun startVolumeWatch() {
+        val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        handler.removeCallbacks(volumeWatch)
+        try {
+            savedStreamIndex = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+            if (am.isStreamMute(AudioManager.STREAM_MUSIC)) {
+                am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_UNMUTE, 0)
+            }
+            am.setStreamVolume(AudioManager.STREAM_MUSIC, STREAM_CENTER, 0)
+        } catch (e: RuntimeException) {
+            Log.w(SESSION, "cannot read the system volume", e)
+            return
+        }
+        handler.postDelayed(volumeWatch, VOLUME_WATCH_MS)
+    }
+
+    private fun stopVolumeWatch() {
+        handler.removeCallbacks(volumeWatch)
+        if (savedStreamIndex >= 0) {
+            try {
+                (getSystemService(Context.AUDIO_SERVICE) as AudioManager)
+                    .setStreamVolume(AudioManager.STREAM_MUSIC, savedStreamIndex, 0)
+            } catch (e: RuntimeException) {
+                Log.w(SESSION, "cannot restore the system volume", e)
+            }
+            savedStreamIndex = -1
+        }
+    }
+
+    private fun watchSystemVolume() {
+        val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        try {
+            val index = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+            val muted = am.isStreamMute(AudioManager.STREAM_MUSIC)
+            if (muted) {
+                // The mute key: toggle the receiver's own mute and release the system one so the
+                // next press is seen again.
+                am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_UNMUTE, 0)
+                val current = ReceiverState.current.outputLevel
+                if (current > 0f) {
+                    levelBeforeMute = current
+                    setOutputLevel(0f)
+                } else {
+                    setOutputLevel(levelBeforeMute.coerceAtLeast(1f / OUTPUT_STEPS))
+                }
+            } else if (index != STREAM_CENTER) {
+                val next = (Math.round(ReceiverState.current.outputLevel * OUTPUT_STEPS) + (index - STREAM_CENTER))
+                    .coerceIn(0, OUTPUT_STEPS) / OUTPUT_STEPS.toFloat()
+                am.setStreamVolume(AudioManager.STREAM_MUSIC, STREAM_CENTER, 0)
+                setOutputLevel(next)
+            }
+        } catch (e: RuntimeException) {
+            Log.w(SESSION, "volume watch failed", e)
+        }
+    }
+
+    private fun setOutputLevel(level: Float) {
+        ReceiverState.update { it.copy(outputLevel = level, outputAtMs = SystemClock.elapsedRealtime()) }
     }
 
     /** The AirPlay slider scale: -30 dB at the bottom, 0 dB at the top, silence at 0. */
@@ -149,6 +227,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
             screenReceiverRegistered = false
         }
         if (NativeBridge.listener === this) NativeBridge.listener = null
+        stopVolumeWatch()
         ReceiverState.remove(outputListener)
         releaseMediaSession()
         RemoteControl.client = null
@@ -448,6 +527,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
         // here too; on a TV with HDMI-CEC this switches the TV on so the audio is heard.
         wakeDisplay()
         acquireSessionLocks()
+        startVolumeWatch()
         ReceiverState.update {
             it.copy(status = Status.CONNECTED, clientName = clientName, clientModel = clientModel, pin = null)
         }
@@ -457,6 +537,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
     override fun onSessionEnded() {
         Log.i(SESSION, "session ended")
         audio.stop()
+        stopVolumeWatch()
         releaseSessionLocks()
         Notifications.cancelSessionPrompt(this)
         ReceiverState.update {
@@ -651,6 +732,10 @@ class ReceiverService : Service(), NativeBridge.Listener {
     companion object {
         /** Must match STARVE_MS in core/android/audio_pipeline.c: how long the audio was dry. */
         private const val PAUSE_DETECT_MS = 300L
+
+        private const val VOLUME_WATCH_MS = 150L
+        private const val STREAM_CENTER = 8
+        private const val OUTPUT_STEPS = 16
 
         /** A progress update this recent before the audio ran dry was sent at the pause and is stale. */
         private const val PAUSE_PROGRESS_WINDOW_MS = 1500L

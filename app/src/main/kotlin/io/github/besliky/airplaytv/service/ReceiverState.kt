@@ -40,6 +40,7 @@ object ReceiverState {
         val volumeAtMs: Long = 0,
         /** The receiver's own volume set with the TV remote, slider position 0..1 (-30..0 dB). */
         val outputLevel: Float = 1f,
+        val outputAtMs: Long = 0,
     )
 
     private val handler = Handler(Looper.getMainLooper())

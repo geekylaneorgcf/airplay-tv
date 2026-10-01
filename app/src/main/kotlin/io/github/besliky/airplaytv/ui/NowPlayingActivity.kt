@@ -56,10 +56,10 @@ class NowPlayingActivity : Activity() {
     private var shiftStep = 0
     private var lastTitle = ""
     private var lastVolumeAt = 0L
+    private var lastOutputAt = 0L
     private lateinit var volumeHud: VolumeHud
     private lateinit var volumeGroup: LinearLayout
     private lateinit var volumeCaption: TextView
-    private var levelBeforeMute = 1f
 
     private val stateListener: (ReceiverState.Snapshot) -> Unit = { render(it) }
 
@@ -99,6 +99,7 @@ class NowPlayingActivity : Activity() {
             )
         }
         lastVolumeAt = ReceiverState.current.volumeAtMs
+        lastOutputAt = ReceiverState.current.outputAtMs
         setContentView(buildContent())
     }
 
@@ -248,6 +249,10 @@ class NowPlayingActivity : Activity() {
             lastTitle = s.title
             setDimmed(false)
         }
+        if (s.outputAtMs != lastOutputAt) {
+            lastOutputAt = s.outputAtMs
+            showVolume(s.outputLevel, s.outputLevel <= 0f, R.string.volume_source_remote)
+        }
         if (s.volumeAtMs != lastVolumeAt) {
             lastVolumeAt = s.volumeAtMs
             if (s.volume >= 0f) showVolume(s.volume, s.volume <= 0f, R.string.volume_source_phone)
@@ -265,28 +270,6 @@ class NowPlayingActivity : Activity() {
             .setInterpolator(DecelerateInterpolator()).start()
         handler.removeCallbacks(hideVolume)
         handler.postDelayed(hideVolume, VOLUME_SHOWN_MS)
-    }
-
-    /** The remote's volume buttons set the receiver's own volume (the stick cannot change the TV's). */
-    private fun changeOutputLevel(delta: Float) {
-        val next = (Math.round((ReceiverState.current.outputLevel + delta) * LEVEL_STEPS) / LEVEL_STEPS.toFloat())
-            .coerceIn(0f, 1f)
-        setOutputLevel(next)
-    }
-
-    private fun toggleMute() {
-        val current = ReceiverState.current.outputLevel
-        if (current > 0f) {
-            levelBeforeMute = current
-            setOutputLevel(0f)
-        } else {
-            setOutputLevel(levelBeforeMute.coerceAtLeast(1f / LEVEL_STEPS))
-        }
-    }
-
-    private fun setOutputLevel(level: Float) {
-        ReceiverState.update { it.copy(outputLevel = level) }
-        showVolume(level, level <= 0f, R.string.volume_source_remote)
     }
 
     private fun updateProgress() {
@@ -309,11 +292,6 @@ class NowPlayingActivity : Activity() {
     // ---- remote control and OLED care ----
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        when (keyCode) {
-            KeyEvent.KEYCODE_VOLUME_UP -> { changeOutputLevel(1f / LEVEL_STEPS); return true }
-            KeyEvent.KEYCODE_VOLUME_DOWN -> { changeOutputLevel(-1f / LEVEL_STEPS); return true }
-            KeyEvent.KEYCODE_VOLUME_MUTE -> { if (event.repeatCount == 0) toggleMute(); return true }
-        }
         if (dimmed) {
             setDimmed(false)
             if (keyCode != KeyEvent.KEYCODE_BACK) return true // the first press only wakes the screen
@@ -360,7 +338,6 @@ class NowPlayingActivity : Activity() {
         const val PROGRESS_INTERVAL_MS = 500L
         const val DIM_AFTER_MS = 2 * 60 * 1000L
         const val VOLUME_SHOWN_MS = 2000L
-        const val LEVEL_STEPS = 16
         const val DIM_ALPHA = 0.3f
         const val SHIFT_INTERVAL_MS = 60 * 1000L
 
