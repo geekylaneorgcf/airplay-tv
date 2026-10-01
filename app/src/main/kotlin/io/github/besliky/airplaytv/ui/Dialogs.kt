@@ -1,15 +1,18 @@
 package io.github.besliky.airplaytv.ui
 
 import android.app.Activity
-import android.app.AlertDialog
-import android.content.DialogInterface
+import android.app.Dialog
+import android.content.Context
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.text.InputFilter
 import android.text.InputType
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import android.widget.Button
 import android.widget.EditText
@@ -22,42 +25,47 @@ import io.github.besliky.airplaytv.Settings
 import kotlin.math.min
 
 /**
- * Small framework dialogs styled for the TV theme: a left-aligned title and text, steps and shell
- * commands in boxes of their own, and buttons whose text stays readable when they have focus.
+ * Small dialogs built from plain views for the TV theme: a left-aligned title and text, steps and shell
+ * commands in boxes of their own, and buttons that light up when they have focus. They are not
+ * [android.app.AlertDialog]s on purpose: that one filled the whole screen height on Fire OS, did not
+ * shrink its text to make room for its buttons, and ignored the focus colours set on them.
  */
 object Dialogs {
 
-    private const val WIDTH_DP = 680
+    private const val WIDTH_DP = 760
 
-    private fun builder(activity: Activity) = AlertDialog.Builder(activity, R.style.Theme_AirPlayTV_Dialog)
+    private class Action(val label: CharSequence, val onClick: () -> Unit)
 
-    private fun dp(activity: Activity, v: Int) =
-        TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v.toFloat(), activity.resources.displayMetrics).toInt()
+    private fun dp(context: Context, v: Int) =
+        TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v.toFloat(), context.resources.displayMetrics).toInt()
 
-    /** Shows [dialog], styles its buttons and, with [widthDp], keeps its width readable on a wide screen. */
-    private fun present(activity: Activity, dialog: AlertDialog, widthDp: Int = 0): AlertDialog {
-        dialog.show()
-        for (which in intArrayOf(DialogInterface.BUTTON_POSITIVE, DialogInterface.BUTTON_NEGATIVE, DialogInterface.BUTTON_NEUTRAL)) {
-            dialog.getButton(which)?.let { styleButton(activity, it) }
+    /** A scroll view that never grows taller than [maxHeight], so the buttons below it cannot be pushed off the screen. */
+    private class BoundedScrollView(context: Context, private val maxHeight: Int) : ScrollView(context) {
+        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+            super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(maxHeight, MeasureSpec.AT_MOST))
         }
-        if (widthDp > 0) {
-            val screen = activity.resources.displayMetrics.widthPixels
-            dialog.window?.setLayout(min(dp(activity, widthDp), screen - dp(activity, 48)), ViewGroup.LayoutParams.WRAP_CONTENT)
-        }
-        return dialog
     }
 
-    /** The framework's focused button is a light box with light text; this keeps the text dark on it. */
-    private fun styleButton(activity: Activity, button: Button) {
-        button.isAllCaps = false
-        button.setTextSize(TypedValue.COMPLEX_UNIT_SP, 19f)
-        button.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-        button.setTextColor(activity.getColorStateList(R.color.row_title))
-        button.background = activity.getDrawable(R.drawable.dialog_button_background)
-        button.minWidth = dp(activity, 120)
-        button.minHeight = dp(activity, 48)
-        button.setPadding(dp(activity, 24), 0, dp(activity, 24), 0)
-        button.stateListAnimator = null
+    private fun rounded(context: Context, color: Int, radiusDp: Int) = GradientDrawable().apply {
+        setColor(color)
+        cornerRadius = dp(context, radiusDp).toFloat()
+    }
+
+    /**
+     * Gives [view] the settings-row look: a raised fill, and a light card with dark text while it has
+     * focus. Done in a focus listener rather than a state list, because the state list never showed.
+     */
+    private fun lightsUpOnFocus(activity: Activity, view: TextView, radiusDp: Int) {
+        val idle = activity.getColor(R.color.surface_raised)
+        val lit = activity.getColor(R.color.surface_focused)
+        val light = activity.getColor(R.color.text_primary)
+        val dark = activity.getColor(R.color.text_on_focus)
+        fun look(focused: Boolean) {
+            view.background = rounded(activity, if (focused) lit else idle, radiusDp)
+            view.setTextColor(if (focused) dark else light)
+        }
+        view.setOnFocusChangeListener { _, focused -> look(focused) }
+        look(view.isFocused)
     }
 
     private fun titleView(activity: Activity, text: CharSequence) = TextView(activity).apply {
@@ -67,12 +75,12 @@ object Dialogs {
         setTextColor(activity.getColor(R.color.text_primary))
         gravity = Gravity.START
         textAlignment = View.TEXT_ALIGNMENT_VIEW_START
-        setPadding(dp(activity, 24), dp(activity, 22), dp(activity, 24), dp(activity, 6))
+        setPadding(dp(activity, 28), dp(activity, 24), dp(activity, 28), dp(activity, 8))
     }
 
-    private fun paragraph(activity: Activity, text: CharSequence, topDp: Int = 0) = TextView(activity).apply {
+    private fun paragraph(activity: Activity, text: CharSequence, sizeSp: Float = 17f, topDp: Int = 0) = TextView(activity).apply {
         this.text = text
-        setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp)
         setTextColor(activity.getColor(R.color.text_primary))
         setLineSpacing(0f, 1.15f)
         gravity = Gravity.START
@@ -84,13 +92,13 @@ object Dialogs {
     /** One shell command in a box: numbered, monospace, wrapped at spaces so the next command cannot run into it. */
     private fun commandBox(activity: Activity, number: Int, text: String) = LinearLayout(activity).apply {
         orientation = LinearLayout.HORIZONTAL
-        background = activity.getDrawable(R.drawable.code_block_background)
+        background = rounded(activity, activity.getColor(R.color.surface_raised), 12)
         setPadding(dp(activity, 14), dp(activity, 10), dp(activity, 14), dp(activity, 10))
         layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             .apply { topMargin = dp(activity, 12) }
         addView(TextView(activity).apply {
             this.text = number.toString()
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             setTextColor(activity.getColor(R.color.text_secondary))
             minWidth = dp(activity, 20)
@@ -98,19 +106,101 @@ object Dialogs {
         addView(TextView(activity).apply {
             this.text = text
             typeface = Typeface.MONOSPACE
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
             setTextColor(activity.getColor(R.color.text_primary))
             setLineSpacing(0f, 1.2f)
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
     }
 
-    private fun body(activity: Activity, fill: LinearLayout.() -> Unit): ScrollView {
-        val column = LinearLayout(activity).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(activity, 24), dp(activity, 4), dp(activity, 24), dp(activity, 12))
-            fill()
+    private fun column(activity: Activity, fill: LinearLayout.() -> Unit) = LinearLayout(activity).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(activity, 28), dp(activity, 4), dp(activity, 28), dp(activity, 12))
+        fill()
+    }
+
+    private fun actionButton(activity: Activity, action: Action, dialog: Dialog) = Button(activity).apply {
+        isAllCaps = false
+        text = action.label
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, 19f)
+        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        minWidth = dp(activity, 128)
+        minHeight = dp(activity, 52)
+        setPadding(dp(activity, 28), 0, dp(activity, 28), 0)
+        stateListAnimator = null
+        isFocusable = true
+        lightsUpOnFocus(activity, this, 14)
+        setOnClickListener {
+            dialog.dismiss()
+            action.onClick()
         }
-        return ScrollView(activity).apply { addView(column) }
+    }
+
+    /**
+     * Shows a dialog: [title], a [body] that scrolls if it has to, and [actions] along the bottom. The
+     * panel is as tall as its content but never taller than the screen. [focus] starts with the focus
+     * (default: the last action).
+     */
+    private fun present(
+        activity: Activity,
+        title: CharSequence,
+        body: View,
+        actions: List<Action>,
+        focus: (List<View>) -> View? = { it.lastOrNull() },
+        softInput: Boolean = false,
+    ): Dialog {
+        val metrics = activity.resources.displayMetrics
+        val width = min(dp(activity, WIDTH_DP), metrics.widthPixels - dp(activity, 96))
+        val maxBody = metrics.heightPixels - dp(activity, 250)
+        val dialog = Dialog(activity, R.style.Theme_AirPlayTV_Overlay)
+
+        val scroll = BoundedScrollView(activity, maxBody).apply { addView(body) }
+        val buttons = ArrayList<View>()
+        val bar = LinearLayout(activity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.END
+            setPadding(dp(activity, 28), dp(activity, 12), dp(activity, 28), dp(activity, 24))
+            for (action in actions) {
+                val button = actionButton(activity, action, dialog)
+                buttons += button
+                addView(button, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                    .apply { marginStart = dp(activity, 12) })
+            }
+        }
+        val panel = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            background = rounded(activity, activity.getColor(R.color.surface), 20)
+            addView(titleView(activity, title))
+            addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+        dialog.setContentView(
+            FrameLayout(activity).apply {
+                addView(panel, FrameLayout.LayoutParams(width, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+            },
+        )
+        // The up and down keys scroll a body that is taller than its box, wherever the focus is.
+        dialog.setOnKeyListener { _, keyCode, event ->
+            val direction = when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_DOWN -> 1
+                KeyEvent.KEYCODE_DPAD_UP -> -1
+                else -> 0
+            }
+            if (direction != 0 && event.action == KeyEvent.ACTION_DOWN && scroll.canScrollVertically(direction)) {
+                scroll.smoothScrollBy(0, direction * dp(activity, 96))
+                true
+            } else {
+                false
+            }
+        }
+        dialog.window?.apply {
+            setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            setDimAmount(0.65f)
+            if (softInput) setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        }
+        dialog.show()
+        focus(buttons)?.requestFocus()
+        return dialog
     }
 
     fun editName(activity: Activity, current: String, onDone: (String) -> Unit) {
@@ -126,18 +216,7 @@ object Dialogs {
             setHintTextColor(activity.getColor(R.color.text_secondary))
             textSize = 22f
         }
-        val container = FrameLayout(activity).apply {
-            setPadding(dp(activity, 24), dp(activity, 8), dp(activity, 24), 0)
-            addView(input)
-        }
-        val dialog = builder(activity)
-            .setCustomTitle(titleView(activity, activity.getString(R.string.dialog_name_title)))
-            .setView(container)
-            .setPositiveButton(R.string.dialog_ok) { _, _ ->
-                Settings.sanitizeName(input.text.toString())?.let(onDone)
-            }
-            .setNegativeButton(R.string.dialog_cancel, null)
-            .create()
+        lateinit var dialog: Dialog
         input.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_DONE) {
                 Settings.sanitizeName(input.text.toString())?.let(onDone)
@@ -147,32 +226,39 @@ object Dialogs {
                 false
             }
         }
-        present(activity, dialog, WIDTH_DP)
-        input.requestFocus()
+        dialog = present(
+            activity,
+            activity.getString(R.string.dialog_name_title),
+            column(activity) { addView(input, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)) },
+            listOf(
+                Action(activity.getString(R.string.dialog_cancel)) {},
+                Action(activity.getString(R.string.dialog_ok)) { Settings.sanitizeName(input.text.toString())?.let(onDone) },
+            ),
+            focus = { input },
+            softInput = true,
+        )
     }
 
+    /** Asks before something destructive; the focus starts on the safe answer. */
     fun confirm(activity: Activity, title: Int, message: Int, confirmLabel: Int, onConfirm: () -> Unit) {
         present(
             activity,
-            builder(activity)
-                .setCustomTitle(titleView(activity, activity.getString(title)))
-                .setView(body(activity) { addView(paragraph(activity, activity.getString(message))) })
-                .setPositiveButton(confirmLabel) { _, _ -> onConfirm() }
-                .setNegativeButton(R.string.dialog_cancel, null)
-                .create(),
-            WIDTH_DP,
+            activity.getString(title),
+            column(activity) { addView(paragraph(activity, activity.getString(message))) },
+            listOf(
+                Action(activity.getString(R.string.dialog_cancel)) {},
+                Action(activity.getString(confirmLabel), onConfirm),
+            ),
+            focus = { it.firstOrNull() },
         )
     }
 
     fun message(activity: Activity, title: CharSequence, message: CharSequence) {
         present(
             activity,
-            builder(activity)
-                .setCustomTitle(titleView(activity, title))
-                .setView(body(activity) { addView(paragraph(activity, message)) })
-                .setPositiveButton(R.string.dialog_close, null)
-                .create(),
-            WIDTH_DP,
+            title,
+            column(activity) { addView(paragraph(activity, message)) },
+            listOf(Action(activity.getString(R.string.dialog_close)) {}),
         )
     }
 
@@ -184,52 +270,66 @@ object Dialogs {
     fun steps(activity: Activity, title: CharSequence, intro: CharSequence, commands: List<String>, outro: CharSequence? = null) {
         present(
             activity,
-            builder(activity)
-                .setCustomTitle(titleView(activity, title))
-                .setView(body(activity) {
-                    addView(paragraph(activity, intro))
-                    commands.forEachIndexed { i, command -> addView(commandBox(activity, i + 1, command)) }
-                    if (outro != null) addView(paragraph(activity, outro, topDp = 16))
-                })
-                .setPositiveButton(R.string.dialog_close, null)
-                .create(),
-            WIDTH_DP,
+            title,
+            column(activity) {
+                addView(paragraph(activity, intro))
+                commands.forEachIndexed { i, command -> addView(commandBox(activity, i + 1, command)) }
+                if (outro != null) addView(paragraph(activity, outro, sizeSp = 15f, topDp = 16))
+            },
+            listOf(Action(activity.getString(R.string.dialog_close)) {}),
         )
     }
 
-    /** Scrollable monospace text, for diagnostics and license texts. */
+    /** Scrollable monospace text, for diagnostics and license texts. The text takes the focus so the arrow keys scroll it. */
     fun longText(activity: Activity, title: CharSequence, text: CharSequence) {
         val tv = TextView(activity).apply {
             this.text = text
             typeface = Typeface.MONOSPACE
             textSize = 13f
             setTextColor(activity.getColor(R.color.text_primary))
-            setPadding(dp(activity, 24), dp(activity, 8), dp(activity, 24), dp(activity, 8))
+            setPadding(dp(activity, 28), dp(activity, 8), dp(activity, 28), dp(activity, 8))
             setTextIsSelectable(false)
             isFocusable = true
         }
-        val scroll = ScrollView(activity).apply { addView(tv) }
         present(
             activity,
-            builder(activity)
-                .setCustomTitle(titleView(activity, title))
-                .setView(scroll)
-                .setPositiveButton(R.string.dialog_close, null)
-                .create(),
+            title,
+            tv,
+            listOf(Action(activity.getString(R.string.dialog_close)) {}),
+            focus = { tv },
         )
     }
 
+    /** A short list to pick one entry from; the focus starts on the current choice. */
     fun choose(activity: Activity, title: Int, items: List<String>, selected: Int, onChoose: (Int) -> Unit) {
-        present(
-            activity,
-            builder(activity)
-                .setCustomTitle(titleView(activity, activity.getString(title)))
-                .setSingleChoiceItems(items.toTypedArray(), selected) { dialog, which ->
-                    onChoose(which)
-                    dialog.dismiss()
+        lateinit var dialog: Dialog
+        val rows = ArrayList<View>()
+        val list = column(activity) {
+            items.forEachIndexed { i, label ->
+                val row = TextView(activity).apply {
+                    text = if (i == selected) "✓  $label" else "     $label"
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 19f)
+                    typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                    setPadding(dp(activity, 20), dp(activity, 14), dp(activity, 20), dp(activity, 14))
+                    isFocusable = true
+                    isClickable = true
+                    lightsUpOnFocus(activity, this, 14)
+                    setOnClickListener {
+                        dialog.dismiss()
+                        onChoose(i)
+                    }
                 }
-                .setNegativeButton(R.string.dialog_cancel, null)
-                .create(),
+                rows += row
+                addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                    .apply { topMargin = dp(activity, 4) })
+            }
+        }
+        dialog = present(
+            activity,
+            activity.getString(title),
+            list,
+            listOf(Action(activity.getString(R.string.dialog_cancel)) {}),
+            focus = { rows.getOrNull(selected) ?: rows.firstOrNull() },
         )
     }
 }
