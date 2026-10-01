@@ -4,8 +4,8 @@ import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.util.Log
-import java.net.HttpURLConnection
-import java.net.URL
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -67,14 +67,22 @@ class DacpClient(context: Context) {
             p = port
         }
         executor.execute {
+            // A plain socket, not HttpURLConnection: the platform blocks cleartext HTTP by default
+            // (targetSdk 28+), and this protocol is cleartext on the local network by design. Only
+            // this one request is affected, so the app-wide policy stays strict.
             try {
-                val conn = URL("http://$h:$p/ctrl-int/1/$command").openConnection() as HttpURLConnection
-                conn.requestMethod = "GET"
-                conn.setRequestProperty("Active-Remote", token)
-                conn.connectTimeout = 2000
-                conn.readTimeout = 2000
-                Log.i(TAG, "$command -> HTTP ${conn.responseCode}")
-                conn.disconnect()
+                Socket().use { socket ->
+                    socket.connect(InetSocketAddress(h, p), TIMEOUT_MS)
+                    socket.soTimeout = TIMEOUT_MS
+                    val request = "GET /ctrl-int/1/$command HTTP/1.1\r\nHost: $h:$p\r\n" +
+                        "Active-Remote: $token\r\nConnection: close\r\n\r\n"
+                    socket.getOutputStream().apply {
+                        write(request.toByteArray(Charsets.US_ASCII))
+                        flush()
+                    }
+                    val status = socket.getInputStream().bufferedReader(Charsets.US_ASCII).readLine()
+                    Log.i(TAG, "$command -> $status")
+                }
             } catch (e: Exception) {
                 Log.w(TAG, "$command failed", e)
             }
@@ -146,6 +154,7 @@ class DacpClient(context: Context) {
     companion object {
         private const val TAG = "AirPlayTV-DACP"
         private const val SERVICE_TYPE = "_dacp._tcp"
+        private const val TIMEOUT_MS = 2000
 
         const val PLAY_PAUSE = "playpause"
         const val NEXT = "nextitem"
