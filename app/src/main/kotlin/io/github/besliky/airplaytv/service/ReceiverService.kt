@@ -512,6 +512,8 @@ class ReceiverService : Service(), NativeBridge.Listener {
         val positionMs = ((current - start) and 0xFFFFFFFFL) * 1000 / rate
         if (durationMs <= 0) return
         val now = SystemClock.elapsedRealtime()
+        android.util.Log.i("AirPlayTV-NP", "progress t=$now start=$start current=$current end=$end posMs=$positionMs durMs=$durationMs " +
+            "prevPos=${ReceiverState.current.positionMs}@${ReceiverState.current.positionAtMs} playing=${ReceiverState.current.playing}")
         lastProgressMs = positionMs.coerceAtMost(durationMs)
         lastProgressAt = now
         ReceiverState.update {
@@ -533,6 +535,9 @@ class ReceiverService : Service(), NativeBridge.Listener {
                     (position + now - it.positionAtMs).coerceAtMost(it.durationMs.coerceAtLeast(0))
                 }
             }
+            android.util.Log.i("AirPlayTV-NP", "onPlaying($playing) t=$now was=${it.positionMs}@${it.positionAtMs} " +
+                "extrapolated=${it.positionMs + now - it.positionAtMs} lastProgress=$lastProgressMs@$lastProgressAt " +
+                "chosen=$position dur=${it.durationMs}")
             it.copy(playing = playing, positionMs = position, positionAtMs = now)
         }
         refreshMediaSession()
