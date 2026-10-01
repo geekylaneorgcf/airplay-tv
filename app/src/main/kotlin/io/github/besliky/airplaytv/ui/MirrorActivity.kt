@@ -1,6 +1,7 @@
 package io.github.besliky.airplaytv.ui
 
 import android.app.Activity
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -42,6 +43,18 @@ class MirrorActivity : Activity(), SurfaceHolder.Callback {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_mirror)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        // A sender can connect while the device sleeps (TV off, network still up). Turn the
+        // screen on so the picture is actually shown instead of staying on a dark display.
+        if (Build.VERSION.SDK_INT >= 27) {
+            setTurnScreenOn(true)
+            setShowWhenLocked(true)
+        } else {
+            @Suppress("DEPRECATION")
+            window.addFlags(
+                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                    WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED,
+            )
+        }
         settings = Settings(this)
         root = findViewById(R.id.root)
         surface = findViewById(R.id.surface)

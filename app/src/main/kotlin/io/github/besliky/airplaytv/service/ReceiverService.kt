@@ -355,7 +355,27 @@ class ReceiverService : Service(), NativeBridge.Listener {
 
     // ---- playback screen ----
 
+    /**
+     * Wakes a sleeping display (e.g. a TV that went to standby with the network still up) so the
+     * playback screen is visible. A brief screen wake lock is enough; the activity keeps the
+     * screen on afterwards. No-op when the display is already on.
+     */
+    @Suppress("DEPRECATION")
+    private fun wakeDisplay() {
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (pm.isInteractive) return
+        try {
+            pm.newWakeLock(
+                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                "airplaytv:wake",
+            ).acquire(3_000L)
+        } catch (e: RuntimeException) {
+            Log.w(SESSION, "cannot wake the display", e)
+        }
+    }
+
     private fun showPlayback() {
+        wakeDisplay()
         val intent = Intent(this, MirrorActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         val allowed = Build.VERSION.SDK_INT < 29 || canDrawOverlays(this) || App.isInForeground
