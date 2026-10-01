@@ -72,9 +72,16 @@ object LyricsRepository {
         connection.setRequestProperty("User-Agent", "AirPlayTV-fork/$version (https://github.com/geekylaneorgcf/airplay-tv)")
         connection.setRequestProperty("Accept", "application/json")
         try {
-            if (connection.responseCode != HttpURLConnection.HTTP_OK) return null
+            val code = connection.responseCode
+            if (code != HttpURLConnection.HTTP_OK) {
+                Log.i(TAG, "lookup answered HTTP $code")
+                return null
+            }
             val body = connection.inputStream.use { readLimited(it) }
-            return pick(JSONArray(body), title, artist, durationMs)
+            val results = JSONArray(body)
+            val picked = pick(results, title, artist, durationMs)
+            Log.i(TAG, "lookup: ${results.length()} candidates, ${if (picked == null) "none usable" else if (picked.synced) "picked synced lyrics" else "picked plain lyrics"}")
+            return picked
         } finally {
             connection.disconnect()
         }

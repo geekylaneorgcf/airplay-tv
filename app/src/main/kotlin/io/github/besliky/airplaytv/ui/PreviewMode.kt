@@ -30,7 +30,7 @@ object PreviewMode {
     private data class Track(val title: String, val artist: String, val album: String, val hue: Float, val seconds: Long)
 
     private val tracks = listOf(
-        Track("Dil Lagiyan", "Navaan Sandhu", "Naveezy", 215f, 175),
+        Track("Dil Lagiyan", "Navaan Sandhu", "Naveezy", 215f, 250),
         Track("Midnight on the Harbour", "The Paper Lanterns", "Slow Tide", 340f, 212),
         Track("A Very Long Song Title That Needs Two Lines To Fit", "Various Artists", "Compilation, Vol. 2", 120f, 241),
     )
