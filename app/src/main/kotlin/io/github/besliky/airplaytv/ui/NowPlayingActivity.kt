@@ -1,10 +1,8 @@
 package io.github.besliky.airplaytv.ui
 
 import android.app.Activity
-import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Typeface
-import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -16,6 +14,7 @@ import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.animation.DecelerateInterpolator
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -58,9 +57,9 @@ class NowPlayingActivity : Activity() {
     private var lastTitle = ""
     private var lastVolumeAt = 0L
     private lateinit var volumeHud: VolumeHud
-    private lateinit var audioManager: AudioManager
-    private var lastStreamVolume = -1
-    private var lastStreamMuted = false
+    private lateinit var volumeGroup: LinearLayout
+    private lateinit var volumeCaption: TextView
+    private var levelBeforeMute = 1f
 
     private val stateListener: (ReceiverState.Snapshot) -> Unit = { render(it) }
 
@@ -73,15 +72,7 @@ class NowPlayingActivity : Activity() {
 
     private val dim = Runnable { setDimmed(true) }
     private val hideVolume = Runnable {
-        volumeHud.animate().alpha(0f).translationX(-dp(12).toFloat()).setDuration(250).start()
-    }
-
-    /** The Fire remote's volume and mute buttons change the stick's own volume; reflect that too. */
-    private val volumePoll = object : Runnable {
-        override fun run() {
-            pollSystemVolume()
-            handler.postDelayed(this, VOLUME_POLL_MS)
-        }
+        volumeGroup.animate().alpha(0f).translationX(-dp(14).toFloat()).setDuration(260).start()
     }
 
     private val shift = object : Runnable {
@@ -107,9 +98,6 @@ class NowPlayingActivity : Activity() {
                     WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED,
             )
         }
-        audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        lastStreamVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-        lastStreamMuted = audioManager.isStreamMute(AudioManager.STREAM_MUSIC)
         lastVolumeAt = ReceiverState.current.volumeAtMs
         setContentView(buildContent())
     }
@@ -118,7 +106,6 @@ class NowPlayingActivity : Activity() {
         super.onStart()
         ReceiverState.observe(stateListener)
         handler.post(tick)
-        handler.post(volumePoll)
         handler.postDelayed(shift, SHIFT_INTERVAL_MS)
         scheduleDim()
     }
@@ -126,7 +113,6 @@ class NowPlayingActivity : Activity() {
     override fun onStop() {
         ReceiverState.remove(stateListener)
         handler.removeCallbacks(tick)
-        handler.removeCallbacks(volumePoll)
         handler.removeCallbacks(shift)
         handler.removeCallbacks(dim)
         handler.removeCallbacks(hideVolume)
@@ -205,12 +191,23 @@ class NowPlayingActivity : Activity() {
 
         content = root
 
-        volumeHud = VolumeHud(this).apply { alpha = 0f }
+        volumeHud = VolumeHud(this)
+        volumeCaption = label(15f, R.color.text_secondary, bold = true, lines = 1).apply { gravity = Gravity.CENTER }
+        volumeGroup = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            alpha = 0f
+        }
+        volumeGroup.addView(volumeHud, LinearLayout.LayoutParams(dp(76), dp(272)))
+        volumeGroup.addView(volumeCaption, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = dp(14)
+        })
 
         val frame = FrameLayout(this)
         frame.addView(root, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        frame.addView(volumeHud, FrameLayout.LayoutParams(dp(56), dp(200), Gravity.START or Gravity.CENTER_VERTICAL).apply {
-            marginStart = dp(36)
+        frame.addView(volumeGroup, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+            Gravity.START or Gravity.CENTER_VERTICAL).apply {
+            marginStart = dp(44)
         })
         return frame
     }
@@ -253,30 +250,43 @@ class NowPlayingActivity : Activity() {
         }
         if (s.volumeAtMs != lastVolumeAt) {
             lastVolumeAt = s.volumeAtMs
-            if (s.volume >= 0f) showVolume(s.volume, s.volume <= 0f)
+            if (s.volume >= 0f) showVolume(s.volume, s.volume <= 0f, R.string.volume_source_phone)
         }
         updateProgress()
     }
 
-    private fun showVolume(level: Float, muted: Boolean) {
+    private fun showVolume(level: Float, muted: Boolean, source: Int) {
         setDimmed(false)
+        volumeCaption.setText(source)
         volumeHud.setLevel(level, muted)
-        volumeHud.animate().cancel()
-        if (volumeHud.alpha < 1f) volumeHud.translationX = -dp(12).toFloat()
-        volumeHud.animate().alpha(1f).translationX(0f).setDuration(180).start()
+        volumeGroup.animate().cancel()
+        if (volumeGroup.alpha < 1f) volumeGroup.translationX = -dp(14).toFloat()
+        volumeGroup.animate().alpha(1f).translationX(0f).setDuration(200)
+            .setInterpolator(DecelerateInterpolator()).start()
         handler.removeCallbacks(hideVolume)
         handler.postDelayed(hideVolume, VOLUME_SHOWN_MS)
     }
 
-    private fun pollSystemVolume() {
-        val volume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-        val muted = audioManager.isStreamMute(AudioManager.STREAM_MUSIC)
-        if (volume != lastStreamVolume || muted != lastStreamMuted) {
-            val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
-            showVolume(volume.toFloat() / max, muted)
+    /** The remote's volume buttons set the receiver's own volume (the stick cannot change the TV's). */
+    private fun changeOutputLevel(delta: Float) {
+        val next = (Math.round((ReceiverState.current.outputLevel + delta) * LEVEL_STEPS) / LEVEL_STEPS.toFloat())
+            .coerceIn(0f, 1f)
+        setOutputLevel(next)
+    }
+
+    private fun toggleMute() {
+        val current = ReceiverState.current.outputLevel
+        if (current > 0f) {
+            levelBeforeMute = current
+            setOutputLevel(0f)
+        } else {
+            setOutputLevel(levelBeforeMute.coerceAtLeast(1f / LEVEL_STEPS))
         }
-        lastStreamVolume = volume
-        lastStreamMuted = muted
+    }
+
+    private fun setOutputLevel(level: Float) {
+        ReceiverState.update { it.copy(outputLevel = level) }
+        showVolume(level, level <= 0f, R.string.volume_source_remote)
     }
 
     private fun updateProgress() {
@@ -299,6 +309,11 @@ class NowPlayingActivity : Activity() {
     // ---- remote control and OLED care ----
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        when (keyCode) {
+            KeyEvent.KEYCODE_VOLUME_UP -> { changeOutputLevel(1f / LEVEL_STEPS); return true }
+            KeyEvent.KEYCODE_VOLUME_DOWN -> { changeOutputLevel(-1f / LEVEL_STEPS); return true }
+            KeyEvent.KEYCODE_VOLUME_MUTE -> { if (event.repeatCount == 0) toggleMute(); return true }
+        }
         if (dimmed) {
             setDimmed(false)
             if (keyCode != KeyEvent.KEYCODE_BACK) return true // the first press only wakes the screen
@@ -345,7 +360,7 @@ class NowPlayingActivity : Activity() {
         const val PROGRESS_INTERVAL_MS = 500L
         const val DIM_AFTER_MS = 2 * 60 * 1000L
         const val VOLUME_SHOWN_MS = 2000L
-        const val VOLUME_POLL_MS = 250L
+        const val LEVEL_STEPS = 16
         const val DIM_ALPHA = 0.3f
         const val SHIFT_INTERVAL_MS = 60 * 1000L
 

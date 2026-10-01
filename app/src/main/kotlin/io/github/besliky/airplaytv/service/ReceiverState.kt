@@ -38,6 +38,8 @@ object ReceiverState {
         /** The sender's volume slider position, 0..1 (AirPlay maps it to -30..0 dB), or -1 if unknown. */
         val volume: Float = -1f,
         val volumeAtMs: Long = 0,
+        /** The receiver's own volume set with the TV remote, slider position 0..1 (-30..0 dB). */
+        val outputLevel: Float = 1f,
     )
 
     private val handler = Handler(Looper.getMainLooper())

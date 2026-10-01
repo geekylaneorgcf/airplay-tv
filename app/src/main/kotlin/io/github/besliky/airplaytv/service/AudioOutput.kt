@@ -31,6 +31,7 @@ class AudioOutput(context: Context) {
 
     @Volatile
     private var gain = 1f
+    private var trim = 1f
 
     @Volatile
     var bufferMs: Int = 0
@@ -78,7 +79,7 @@ class AudioOutput(context: Context) {
             t.release()
             return
         }
-        t.setVolume(gain)
+        t.setVolume(gain * trim)
         bufferMs = t.bufferSizeInFrames * 1000 / sampleRate
         track = t
         requestFocus(attributes)
@@ -122,7 +123,13 @@ class AudioOutput(context: Context) {
 
     fun setVolume(value: Float) {
         gain = value.coerceIn(0f, 1f)
-        track?.setVolume(gain)
+        track?.setVolume(gain * trim)
+    }
+
+    /** The receiver's own volume, applied on top of the sender's. */
+    fun setTrim(value: Float) {
+        trim = value.coerceIn(0f, 1f)
+        track?.setVolume(gain * trim)
     }
 
     fun stop() {

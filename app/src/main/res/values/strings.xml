@@ -71,4 +71,6 @@
     <string name="dialog_decoder_title">Preferred Decoder</string>
     <string name="now_playing_from">Playing from %1$s</string>
     <string name="now_playing_device">AirPlay</string>
+    <string name="volume_source_phone">iPhone</string>
+    <string name="volume_source_remote">Fire TV</string>
 </resources>

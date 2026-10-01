@@ -36,6 +36,7 @@ import io.github.besliky.airplaytv.service.ReceiverState.Status
 import io.github.besliky.airplaytv.ui.MirrorActivity
 import io.github.besliky.airplaytv.ui.NowPlayingActivity
 import kotlin.math.log10
+import kotlin.math.pow
 
 /**
  * Headless AirPlay receiver. Runs as a foreground service for as long as AirPlay is
@@ -63,6 +64,20 @@ class ReceiverService : Service(), NativeBridge.Listener {
     private var wifiLock: WifiManager.WifiLock? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var audioSampleRate = 44100
+    private var appliedLevel = -1f
+
+    /** Applies the volume set with the TV remote to the audio output and remembers it. */
+    private val outputListener: (ReceiverState.Snapshot) -> Unit = { s ->
+        if (s.outputLevel != appliedLevel) {
+            appliedLevel = s.outputLevel
+            audio.setTrim(levelToGain(s.outputLevel))
+            settings.outputLevel = s.outputLevel
+        }
+    }
+
+    /** The AirPlay slider scale: -30 dB at the bottom, 0 dB at the top, silence at 0. */
+    private fun levelToGain(level: Float): Float =
+        if (level <= 0f) 0f else 10f.pow((level - 1f) * 30f / 20f)
     private var lastProgressMs = -1L
     private var lastProgressAt = 0L
     private var prevAnchorMs = -1L
@@ -95,6 +110,8 @@ class ReceiverService : Service(), NativeBridge.Listener {
             onPublished = { name -> ReceiverState.update { it.copy(publishedName = name) } }
         }
         audio = AudioOutput(this)
+        ReceiverState.update { it.copy(outputLevel = settings.outputLevel) }
+        ReceiverState.observe(outputListener)
         dacp = DacpClient(this).also { RemoteControl.client = it }
         network = NetworkMonitor(this, ::onNetworkChanged)
         network.start()
@@ -132,6 +149,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
             screenReceiverRegistered = false
         }
         if (NativeBridge.listener === this) NativeBridge.listener = null
+        ReceiverState.remove(outputListener)
         releaseMediaSession()
         RemoteControl.client = null
         dacp?.shutdown()
