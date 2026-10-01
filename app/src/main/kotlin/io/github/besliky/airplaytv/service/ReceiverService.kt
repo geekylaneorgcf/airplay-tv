@@ -33,6 +33,7 @@ import io.github.besliky.airplaytv.R
 import io.github.besliky.airplaytv.Settings
 import io.github.besliky.airplaytv.core.DecoderSelector
 import io.github.besliky.airplaytv.core.NativeBridge
+import io.github.besliky.airplaytv.service.ReceiverState.LyricsState
 import io.github.besliky.airplaytv.service.ReceiverState.Status
 import io.github.besliky.airplaytv.ui.MirrorActivity
 import io.github.besliky.airplaytv.ui.NowPlayingActivity
@@ -65,18 +66,13 @@ class ReceiverService : Service(), NativeBridge.Listener {
     private var wifiLock: WifiManager.WifiLock? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var audioSampleRate = 44100
-    private var appliedLevel = -1f
     private var savedStreamIndex = -1
     private var levelBeforeMute = 1f
-
-    /** Applies the volume set with the TV remote to the audio output and remembers it. */
-    private val outputListener: (ReceiverState.Snapshot) -> Unit = { s ->
-        if (s.outputLevel != appliedLevel) {
-            appliedLevel = s.outputLevel
-            audio.setTrim(levelToGain(s.outputLevel))
-            settings.outputLevel = s.outputLevel
-        }
-    }
+    private var trackKey = ""
+    private val trackHistory = ArrayList<String>()
+    private var lyricsKey = ""
+    private var lyricsToken = 0
+    private val lyricsRunnable = Runnable { requestLyrics() }
 
     /**
      * Fire OS handles the remote's volume and mute keys itself and never lets an app see them, but
@@ -131,26 +127,67 @@ class ReceiverService : Service(), NativeBridge.Listener {
                 // The mute key: toggle the receiver's own mute and release the system one so the
                 // next press is seen again.
                 am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_UNMUTE, 0)
-                val current = ReceiverState.current.outputLevel
+                val current = currentVolume()
                 if (current > 0f) {
                     levelBeforeMute = current
-                    setOutputLevel(0f)
+                    setVolumeLevel(0f)
                 } else {
-                    setOutputLevel(levelBeforeMute.coerceAtLeast(1f / OUTPUT_STEPS))
+                    setVolumeLevel(levelBeforeMute.coerceAtLeast(1f / OUTPUT_STEPS))
                 }
             } else if (index != STREAM_CENTER) {
-                val next = (Math.round(ReceiverState.current.outputLevel * OUTPUT_STEPS) + (index - STREAM_CENTER))
+                val next = (Math.round(currentVolume() * OUTPUT_STEPS) + (index - STREAM_CENTER))
                     .coerceIn(0, OUTPUT_STEPS) / OUTPUT_STEPS.toFloat()
                 am.setStreamVolume(AudioManager.STREAM_MUSIC, STREAM_CENTER, 0)
-                setOutputLevel(next)
+                setVolumeLevel(next)
             }
         } catch (e: RuntimeException) {
             Log.w(SESSION, "volume watch failed", e)
         }
     }
 
-    private fun setOutputLevel(level: Float) {
-        ReceiverState.update { it.copy(outputLevel = level, outputAtMs = SystemClock.elapsedRealtime()) }
+    /** The volume as a slider position 0..1; one value for the phone's slider and the TV remote. */
+    private fun currentVolume(): Float = ReceiverState.current.volume.let { if (it < 0f) 1f else it }
+
+    /** The remote changed the volume: apply it for real and show it. The phone's next change replaces it. */
+    private fun setVolumeLevel(level: Float) {
+        audio.setVolume(levelToGain(level))
+        ReceiverState.update { it.copy(volume = level, volumeAtMs = SystemClock.elapsedRealtime()) }
+    }
+
+    // ---- lyrics (only when the user turned them on) ----
+
+    private fun scheduleLyrics(delayMs: Long) {
+        if (!settings.lyricsEnabled) return
+        handler.removeCallbacks(lyricsRunnable)
+        handler.postDelayed(lyricsRunnable, delayMs)
+    }
+
+    private fun requestLyrics() {
+        if (!settings.lyricsEnabled) return
+        val s = ReceiverState.current
+        if (s.title.isBlank() || s.artist.isBlank()) {
+            ReceiverState.update { it.copy(lyricsState = LyricsState.NOT_FOUND, lyrics = null) }
+            return
+        }
+        val key = "${s.title}\u0000${s.artist}"
+        if (key == lyricsKey) return
+        lyricsKey = key
+        val token = ++lyricsToken
+        ReceiverState.update { it.copy(lyricsState = LyricsState.LOADING, lyrics = null) }
+        LyricsRepository.load(s.title, s.artist, s.durationMs, BuildConfig.VERSION_NAME) { result ->
+            handler.post {
+                if (token != lyricsToken) return@post // another track was requested meanwhile
+                ReceiverState.update {
+                    it.copy(lyricsState = if (result != null) LyricsState.FOUND else LyricsState.NOT_FOUND, lyrics = result)
+                }
+            }
+        }
+    }
+
+    private fun gainToLevel(gain: Float): Float {
+        // The sender's slider spans -30 dB (quietest) to 0 dB (full); -144 dB means mute.
+        val db = if (gain <= 0f) -144f else 20f * log10(gain)
+        return ((db + 30f) / 30f).coerceIn(0f, 1f)
     }
 
     /** The AirPlay slider scale: -30 dB at the bottom, 0 dB at the top, silence at 0. */
@@ -188,8 +225,6 @@ class ReceiverService : Service(), NativeBridge.Listener {
             onPublished = { name -> ReceiverState.update { it.copy(publishedName = name) } }
         }
         audio = AudioOutput(this)
-        ReceiverState.update { it.copy(outputLevel = settings.outputLevel) }
-        ReceiverState.observe(outputListener)
         dacp = DacpClient(this).also { RemoteControl.client = it }
         network = NetworkMonitor(this, ::onNetworkChanged)
         network.start()
@@ -228,7 +263,6 @@ class ReceiverService : Service(), NativeBridge.Listener {
         }
         if (NativeBridge.listener === this) NativeBridge.listener = null
         stopVolumeWatch()
-        ReceiverState.remove(outputListener)
         releaseMediaSession()
         RemoteControl.client = null
         dacp?.shutdown()
@@ -409,6 +443,17 @@ class ReceiverService : Service(), NativeBridge.Listener {
         when (key) {
             Settings.KEY_ENABLED -> if (settings.enabled) startReceiver() else shutdown()
             Settings.KEY_VERBOSE -> applyLogLevel()
+            Settings.KEY_LYRICS -> {
+                handler.removeCallbacks(lyricsRunnable)
+                lyricsToken++
+                lyricsKey = ""
+                if (settings.lyricsEnabled) {
+                    ReceiverState.update { it.copy(lyricsState = LyricsState.LOADING, lyrics = null) }
+                    scheduleLyrics(0)
+                } else {
+                    ReceiverState.update { it.copy(lyricsState = LyricsState.OFF, lyrics = null) }
+                }
+            }
             in Settings.RESTART_KEYS -> {
                 if (ReceiverState.current.clientName != null) {
                     restartPending = true
@@ -528,8 +573,13 @@ class ReceiverService : Service(), NativeBridge.Listener {
         wakeDisplay()
         acquireSessionLocks()
         startVolumeWatch()
+        trackKey = ""
+        trackHistory.clear()
         ReceiverState.update {
-            it.copy(status = Status.CONNECTED, clientName = clientName, clientModel = clientModel, pin = null)
+            it.copy(
+                status = Status.CONNECTED, clientName = clientName, clientModel = clientModel, pin = null,
+                lyricsState = if (settings.lyricsEnabled) LyricsState.NOT_FOUND else LyricsState.OFF, lyrics = null,
+            )
         }
         enterForeground(statusText())
     }
@@ -543,8 +593,14 @@ class ReceiverService : Service(), NativeBridge.Listener {
         ReceiverState.update {
             it.copy(clientName = null, clientModel = null, videoActive = false, audioActive = false,
                 videoWidth = 0, videoHeight = 0, pin = null, title = "", artist = "", album = "",
-                artwork = null, durationMs = -1, positionMs = -1, playing = true)
+                artwork = null, artColors = null, durationMs = -1, positionMs = -1, playing = true,
+                lyricsState = LyricsState.OFF, lyrics = null)
         }
+        handler.removeCallbacks(lyricsRunnable)
+        lyricsToken++
+        lyricsKey = ""
+        trackKey = ""
+        trackHistory.clear()
         dacp?.clear()
         releaseMediaSession()
         lastProgressMs = -1
@@ -593,24 +649,40 @@ class ReceiverService : Service(), NativeBridge.Listener {
 
     override fun onVolume(gain: Float) {
         audio.setVolume(gain)
-        // The sender's slider spans -30 dB (quietest) to 0 dB (full); -144 dB means mute.
-        val db = if (gain <= 0f) -144f else 20f * log10(gain)
-        val slider = ((db + 30f) / 30f).coerceIn(0f, 1f)
-        android.util.Log.i("AirPlayTV-NP", "volume gain=$gain db=$db slider=$slider")
-        ReceiverState.update { it.copy(volume = slider, volumeAtMs = SystemClock.elapsedRealtime()) }
+        ReceiverState.update { it.copy(volume = gainToLevel(gain), volumeAtMs = SystemClock.elapsedRealtime()) }
     }
 
     override fun onTrackInfo(title: String, artist: String, album: String) {
         // Do not clear the cover or position here: senders do not push track info, artwork and
         // progress in a fixed order, so clearing would wipe a cover that just arrived. A new
         // track's artwork and progress replace the old ones when they come in.
-        ReceiverState.update { it.copy(title = title, artist = artist, album = album) }
+        val key = "$title\u0000$artist"
+        val changed = title.isNotBlank() && key != trackKey
+        var direction = 1
+        if (changed) {
+            // Going back to the track before the current one is a "previous"; anything else is "next".
+            direction = if (trackHistory.size >= 2 && trackHistory[trackHistory.size - 2] == key) -1 else 1
+            if (direction < 0) trackHistory.removeAt(trackHistory.size - 1) else trackHistory.add(key)
+            while (trackHistory.size > TRACK_HISTORY) trackHistory.removeAt(0)
+            trackKey = key
+        }
+        ReceiverState.update {
+            it.copy(
+                title = title, artist = artist, album = album,
+                trackSeq = if (changed) it.trackSeq + 1 else it.trackSeq,
+                trackDirection = if (changed) direction else it.trackDirection,
+                lyricsState = if (changed) (if (settings.lyricsEnabled) LyricsState.LOADING else LyricsState.OFF) else it.lyricsState,
+                lyrics = if (changed) null else it.lyrics,
+            )
+        }
+        if (changed) scheduleLyrics(LYRICS_DELAY_MS)
         refreshMediaSession()
     }
 
     override fun onArtwork(data: ByteArray) {
         val bitmap = decodeArtwork(data) ?: return
-        ReceiverState.update { it.copy(artwork = bitmap) }
+        val colors = ArtworkColors.from(bitmap)
+        ReceiverState.update { it.copy(artwork = bitmap, artworkSeq = it.artworkSeq + 1, artColors = colors) }
         refreshMediaSession()
     }
 
@@ -621,8 +693,6 @@ class ReceiverService : Service(), NativeBridge.Listener {
         val positionMs = ((current - start) and 0xFFFFFFFFL) * 1000 / rate
         if (durationMs <= 0) return
         val now = SystemClock.elapsedRealtime()
-        android.util.Log.i("AirPlayTV-NP", "progress t=$now start=$start current=$current end=$end posMs=$positionMs durMs=$durationMs " +
-            "prevPos=${ReceiverState.current.positionMs}@${ReceiverState.current.positionAtMs} playing=${ReceiverState.current.playing}")
         val before = ReceiverState.current
         if (before.positionMs >= 0) {
             prevAnchorMs = if (before.playing) before.positionMs + (now - before.positionAtMs) else before.positionMs
@@ -656,9 +726,12 @@ class ReceiverService : Service(), NativeBridge.Listener {
                 }
                 position = position.coerceIn(0L, it.durationMs.coerceAtLeast(0))
             }
-            android.util.Log.i("AirPlayTV-NP", "onPlaying($playing) t=$now was=${it.positionMs}@${it.positionAtMs} " +
-                "lastProgress=$lastProgressMs@$lastProgressAt prevAnchor=$prevAnchorMs@$prevAnchorAt chosen=$position")
             it.copy(playing = playing, positionMs = position, positionAtMs = now)
+        }
+        // Playing again after the screen went to sleep (a long pause): bring the screen back.
+        if (playing && !(getSystemService(Context.POWER_SERVICE) as PowerManager).isInteractive) {
+            wakeDisplay()
+            showNowPlaying()
         }
         refreshMediaSession()
     }
@@ -732,6 +805,9 @@ class ReceiverService : Service(), NativeBridge.Listener {
     companion object {
         /** Must match STARVE_MS in core/android/audio_pipeline.c: how long the audio was dry. */
         private const val PAUSE_DETECT_MS = 300L
+
+        private const val TRACK_HISTORY = 8
+        private const val LYRICS_DELAY_MS = 800L
 
         private const val VOLUME_WATCH_MS = 150L
         private const val STREAM_CENTER = 8

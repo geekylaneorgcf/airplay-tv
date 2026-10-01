@@ -38,10 +38,18 @@ object ReceiverState {
         /** The sender's volume slider position, 0..1 (AirPlay maps it to -30..0 dB), or -1 if unknown. */
         val volume: Float = -1f,
         val volumeAtMs: Long = 0,
-        /** The receiver's own volume set with the TV remote, slider position 0..1 (-30..0 dB). */
-        val outputLevel: Float = 1f,
-        val outputAtMs: Long = 0,
+        /** Counts track changes; [trackDirection] is 1 for a next track, -1 when the previous one came back. */
+        val trackSeq: Int = 0,
+        val trackDirection: Int = 1,
+        /** Counts artwork messages, so a new cover is noticed even when it decodes to an equal picture. */
+        val artworkSeq: Int = 0,
+        val artColors: ArtworkColors? = null,
+        val lyricsState: LyricsState = LyricsState.OFF,
+        val lyrics: Lyrics? = null,
     )
+
+    /** OFF: the feature is off. LOADING: a lookup is running. FOUND/NOT_FOUND: its result. */
+    enum class LyricsState { OFF, LOADING, FOUND, NOT_FOUND }
 
     private val handler = Handler(Looper.getMainLooper())
     private val listeners = CopyOnWriteArraySet<(Snapshot) -> Unit>()

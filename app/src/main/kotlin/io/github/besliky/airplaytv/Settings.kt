@@ -23,10 +23,10 @@ class Settings(context: Context) {
         get() = sanitizeName(prefs.getString(KEY_NAME, null)) ?: DEFAULT_NAME
         set(value) = prefs.edit().putString(KEY_NAME, sanitizeName(value) ?: DEFAULT_NAME).apply()
 
-    /** The receiver's own volume, as a slider position 0..1 (-30..0 dB), set with the TV remote. */
-    var outputLevel: Float
-        get() = prefs.getFloat(KEY_OUTPUT_LEVEL, 1f).coerceIn(0f, 1f)
-        set(value) = prefs.edit().putFloat(KEY_OUTPUT_LEVEL, value.coerceIn(0f, 1f)).apply()
+    /** Look up lyrics on lrclib.net for the playing song. Off by default: it is the only thing that uses the internet. */
+    var lyricsEnabled: Boolean
+        get() = prefs.getBoolean(KEY_LYRICS, false)
+        set(value) = prefs.edit().putBoolean(KEY_LYRICS, value).apply()
 
     var enabled: Boolean
         get() = prefs.getBoolean(KEY_ENABLED, true)
@@ -76,7 +76,7 @@ class Settings(context: Context) {
         const val MAX_NAME_LENGTH = 40
 
         const val KEY_NAME = "device_name"
-        const val KEY_OUTPUT_LEVEL = "output_level"
+        const val KEY_LYRICS = "lyrics"
         const val KEY_ENABLED = "enabled"
         const val KEY_PIN = "require_pin"
         const val KEY_AUTOSTART = "start_automatically"

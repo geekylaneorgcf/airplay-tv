@@ -71,6 +71,13 @@
     <string name="dialog_decoder_title">Preferred Decoder</string>
     <string name="now_playing_from">Playing from %1$s</string>
     <string name="now_playing_device">AirPlay</string>
-    <string name="volume_source_phone">iPhone</string>
-    <string name="volume_source_remote">Fire TV</string>
+    <string name="setting_lyrics">Lyrics</string>
+    <string name="dialog_lyrics_title">Lyrics</string>
+    <string name="dialog_lyrics_message">With Lyrics on, the title and artist of the song that is playing are sent to lrclib.net to find its lyrics. Nothing else leaves this TV.\n\nWhile a song plays, press Down on the remote to see the lyrics and Up or Back to close them.</string>
+    <string name="lyrics_off">Lyrics are off</string>
+    <string name="lyrics_loading">Looking for lyrics…</string>
+    <string name="lyrics_not_found">No lyrics found</string>
+    <string name="lyrics_instrumental">Instrumental</string>
+    <string name="lyrics_hint">Down for lyrics</string>
+    <string name="lyrics_turn_on">Turn on Lyrics in the AirPlay TV settings</string>
 </resources>

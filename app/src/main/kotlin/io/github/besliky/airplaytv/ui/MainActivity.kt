@@ -25,6 +25,7 @@ class MainActivity : SettingsPage() {
     private lateinit var autostartRow: Row
     private lateinit var infoRow: Row
     private lateinit var autoOpenRow: Row
+    private lateinit var lyricsRow: Row
 
     private val stateListener: (ReceiverState.Snapshot) -> Unit = { render(it) }
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> bindRows() }
@@ -49,6 +50,7 @@ class MainActivity : SettingsPage() {
             render(ReceiverState.current)
         }
         autoOpenRow = addRow(getString(R.string.setting_auto_open)) { requestAutoOpen() }
+        lyricsRow = addRow(getString(R.string.setting_lyrics)) { toggleLyrics() }
         addRow(getString(R.string.setting_advanced)) {
             startActivity(Intent(this, AdvancedActivity::class.java))
         }.navigates(true)
@@ -56,6 +58,28 @@ class MainActivity : SettingsPage() {
         bindRows()
         rows.getChildAt(0)?.requestFocus()
         requestNotificationPermissionOnce()
+        showPreviewIfRequested(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        showPreviewIfRequested(intent)
+    }
+
+    /** Development aid: `--es preview now` shows the Now Playing screen with sample data, see [PreviewMode]. */
+    private fun showPreviewIfRequested(intent: Intent?) {
+        if (intent == null) return
+        val mode = intent.getStringExtra(NowPlayingActivity.EXTRA_PREVIEW) ?: return
+        intent.removeExtra(NowPlayingActivity.EXTRA_PREVIEW)
+        startActivity(Intent(this, NowPlayingActivity::class.java).putExtra(NowPlayingActivity.EXTRA_PREVIEW, mode))
+    }
+
+    private fun toggleLyrics() {
+        settings.lyricsEnabled = !settings.lyricsEnabled
+        if (settings.lyricsEnabled) {
+            Dialogs.message(this, getString(R.string.dialog_lyrics_title), getString(R.string.dialog_lyrics_message))
+        }
     }
 
     override fun onStart() {
@@ -80,6 +104,7 @@ class MainActivity : SettingsPage() {
         enabledRow.value(onOff(settings.enabled))
         pinRow.value(onOff(settings.requirePin))
         autostartRow.value(onOff(settings.startAutomatically))
+        lyricsRow.value(onOff(settings.lyricsEnabled))
         infoRow.value(onOff(settings.showConnectionInfo))
         autoOpenRow.visible(Build.VERSION.SDK_INT >= 29)
             .value(getString(if (canOpenAutomatically()) R.string.value_allowed else R.string.value_allow))
