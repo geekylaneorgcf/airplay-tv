@@ -35,6 +35,7 @@ import io.github.besliky.airplaytv.core.NativeBridge
 import io.github.besliky.airplaytv.service.ReceiverState.Status
 import io.github.besliky.airplaytv.ui.MirrorActivity
 import io.github.besliky.airplaytv.ui.NowPlayingActivity
+import kotlin.math.log10
 
 /**
  * Headless AirPlay receiver. Runs as a foreground service for as long as AirPlay is
@@ -493,6 +494,11 @@ class ReceiverService : Service(), NativeBridge.Listener {
 
     override fun onVolume(gain: Float) {
         audio.setVolume(gain)
+        // The sender's slider spans -30 dB (quietest) to 0 dB (full); -144 dB means mute.
+        val db = if (gain <= 0f) -144f else 20f * log10(gain)
+        val slider = ((db + 30f) / 30f).coerceIn(0f, 1f)
+        android.util.Log.i("AirPlayTV-NP", "volume gain=$gain db=$db slider=$slider")
+        ReceiverState.update { it.copy(volume = slider, volumeAtMs = SystemClock.elapsedRealtime()) }
     }
 
     override fun onTrackInfo(title: String, artist: String, album: String) {

@@ -35,6 +35,9 @@ object ReceiverState {
         val positionAtMs: Long = 0,
         /** False between a pause and the next audio from the sender. */
         val playing: Boolean = true,
+        /** The sender's volume slider position, 0..1 (AirPlay maps it to -30..0 dB), or -1 if unknown. */
+        val volume: Float = -1f,
+        val volumeAtMs: Long = 0,
     )
 
     private val handler = Handler(Looper.getMainLooper())
