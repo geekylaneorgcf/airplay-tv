@@ -54,6 +54,14 @@ class PresenceTimelineTest {
     }
 
     @Test
+    fun `the minimal stage starts where the screensaver hands over`() {
+        // the player starts with its idle clock set back by this much and is minimal at once
+        assertEquals(8 * minute, t.minimalAfterMs)
+        assertEquals(Stage.MINIMAL, t.stageFor(t.minimalAfterMs, 0))
+        assertEquals(8_000L, t.faster(60).minimalAfterMs)
+    }
+
+    @Test
     fun `a factor below one changes nothing`() {
         assertEquals(Stage.MINIMAL, t.faster(0).stageFor(8 * minute, 0))
     }

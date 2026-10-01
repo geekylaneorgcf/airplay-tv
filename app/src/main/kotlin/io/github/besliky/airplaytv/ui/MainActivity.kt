@@ -28,6 +28,7 @@ class MainActivity : SettingsPage() {
     private lateinit var autoOpenRow: Row
     private lateinit var lyricsRow: Row
     private lateinit var sleepRow: Row
+    private lateinit var returnRow: Row
 
     private val stateListener: (ReceiverState.Snapshot) -> Unit = { render(it) }
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> bindRows() }
@@ -58,6 +59,7 @@ class MainActivity : SettingsPage() {
         autoOpenRow = addRow(getString(R.string.setting_auto_open)) { requestAutoOpen() }
         lyricsRow = addRow(getString(R.string.setting_lyrics)) { toggleLyrics() }
         sleepRow = addRow(getString(R.string.setting_sleep)) { cycleSleep() }
+        returnRow = addRow(getString(R.string.setting_return)) { toggleReturn() }
         addRow(getString(R.string.setting_advanced)) {
             startActivity(Intent(this, AdvancedActivity::class.java))
         }.navigates(true)
@@ -152,6 +154,13 @@ class MainActivity : SettingsPage() {
         )
     }
 
+    private fun toggleReturn() {
+        settings.returnToPlayer = !settings.returnToPlayer
+        if (settings.returnToPlayer) {
+            Dialogs.message(this, getString(R.string.dialog_return_title), getString(R.string.dialog_return_message))
+        }
+    }
+
     private fun toggleLyrics() {
         settings.lyricsEnabled = !settings.lyricsEnabled
         if (settings.lyricsEnabled) {
@@ -191,6 +200,7 @@ class MainActivity : SettingsPage() {
         autostartRow.value(onOff(settings.startAutomatically))
         lyricsRow.value(onOff(settings.lyricsEnabled))
         sleepRow.value(sleepValue())
+        returnRow.value(onOff(settings.returnToPlayer))
         infoRow.value(onOff(settings.showConnectionInfo))
         autoOpenRow.visible(Build.VERSION.SDK_INT >= 29)
             .value(getString(if (canOpenAutomatically()) R.string.value_allowed else R.string.value_allow))

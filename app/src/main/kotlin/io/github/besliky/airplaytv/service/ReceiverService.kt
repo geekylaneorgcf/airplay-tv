@@ -23,6 +23,7 @@ import android.os.SystemClock
 import android.os.PowerManager
 import android.provider.Settings.canDrawOverlays
 import android.view.Display
+import android.view.KeyEvent
 import io.github.besliky.airplaytv.App
 import io.github.besliky.airplaytv.BuildConfig
 import io.github.besliky.airplaytv.Identity
@@ -228,6 +229,16 @@ class ReceiverService : Service(), NativeBridge.Listener {
         }
     }
 
+    /** The system screensaver starts when the TV has been left alone; while music plays, show the player instead. */
+    private val dreamReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val s = ReceiverState.current
+            if (!settings.returnToPlayer || s.status != Status.CONNECTED || !s.audioActive || s.videoActive) return
+            Log.i(SESSION, "the screensaver started while music plays: showing the player")
+            showNowPlaying(fromScreensaver = true)
+        }
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -248,6 +259,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
         network.start()
         settings.registerListener(prefsListener)
         registerReceiver(screenReceiver, IntentFilter(Intent.ACTION_SCREEN_ON))
+        registerReceiver(dreamReceiver, IntentFilter(Intent.ACTION_DREAMING_STARTED))
         screenReceiverRegistered = true
         Log.i(SERVICE, "service created (${BuildConfig.VERSION_NAME})")
     }
@@ -277,6 +289,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
         settings.unregisterListener(prefsListener)
         if (screenReceiverRegistered) {
             unregisterReceiver(screenReceiver)
+            unregisterReceiver(dreamReceiver)
             screenReceiverRegistered = false
         }
         if (NativeBridge.listener === this) NativeBridge.listener = null
@@ -572,12 +585,32 @@ class ReceiverService : Service(), NativeBridge.Listener {
         }
     }
 
-    /** Audio-only senders (music apps): show what is playing, like a TV with built-in AirPlay. */
-    private fun showNowPlaying() {
+    /**
+     * Wakes the device even though it is dreaming. A dreaming device counts as interactive, so
+     * [wakeDisplay] would do nothing and the screensaver would stay on top of the player.
+     */
+    private fun wakeFromDream() {
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        try {
+            pm.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP, "airplaytv:wake")
+                .acquire(3_000L)
+        } catch (e: RuntimeException) {
+            Log.w(SESSION, "cannot end the screensaver", e)
+        }
+    }
+
+    /**
+     * Audio-only senders (music apps): show what is playing, like a TV with built-in AirPlay.
+     * [fromScreensaver] starts the player already dimmed to its idle stage; [peek] shows it for a few
+     * seconds and then goes back to what was on screen.
+     */
+    private fun showNowPlaying(fromScreensaver: Boolean = false, peek: Boolean = false) {
         if (ReceiverState.current.videoActive) return
-        wakeDisplay()
+        if (fromScreensaver) wakeFromDream() else wakeDisplay()
         val intent = Intent(this, NowPlayingActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            .putExtra(NowPlayingActivity.EXTRA_IDLE, fromScreensaver)
+            .putExtra(NowPlayingActivity.EXTRA_PEEK, peek)
         try {
             startActivity(intent)
         } catch (e: RuntimeException) {
@@ -812,6 +845,20 @@ class ReceiverService : Service(), NativeBridge.Listener {
             override fun onSkipToPrevious() = RemoteControl.send(DacpClient.PREVIOUS)
             override fun onFastForward() = RemoteControl.send(DacpClient.NEXT)
             override fun onRewind() = RemoteControl.send(DacpClient.PREVIOUS)
+
+            /** A media key on the remote: do what it says, and show the player for a moment so the change can be seen. */
+            override fun onMediaButtonEvent(mediaButtonIntent: Intent): Boolean {
+                val key = if (Build.VERSION.SDK_INT >= 33) {
+                    mediaButtonIntent.getParcelableExtra(Intent.EXTRA_KEY_EVENT, KeyEvent::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    mediaButtonIntent.getParcelableExtra(Intent.EXTRA_KEY_EVENT)
+                }
+                if (key != null && key.action == KeyEvent.ACTION_DOWN && key.repeatCount == 0 && settings.returnToPlayer) {
+                    showNowPlaying(peek = true)
+                }
+                return super.onMediaButtonEvent(mediaButtonIntent)
+            }
         })
         session.setSessionActivity(
             PendingIntent.getActivity(

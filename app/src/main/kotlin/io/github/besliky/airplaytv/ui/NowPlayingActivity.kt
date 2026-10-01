@@ -79,6 +79,10 @@ class NowPlayingActivity : Activity() {
     private var presence = Presence.ACTIVE
     private var lastInteraction = SystemClock.elapsedRealtime()
     private var peekUntil = 0L
+    private var foreground = false
+    private var startIdle = false
+    private var peekRequested = false
+    private var peekCloseAt = 0L
     private var timeline = PresenceTimeline.STANDARD
     private var presenceTickMs = PRESENCE_TICK_MS
     private var pausedSince = 0L
@@ -163,6 +167,14 @@ class NowPlayingActivity : Activity() {
         }
     }
 
+    /** A peek (the player shown for a moment because of a media key) ends by itself unless someone uses the remote. */
+    private val closePeek = Runnable {
+        if (peekCloseAt > 0 && SystemClock.elapsedRealtime() >= peekCloseAt) {
+            Log.i(TAG, "peek over")
+            finish()
+        }
+    }
+
     private val settleVolume = Runnable { volumeBar.setActive(false) }
     private val hideLyricsVolume = Runnable { lyricsVolume.animate().alpha(0f).setDuration(300).start() }
     private val hideHint = Runnable { hintView.animate().alpha(0f).setDuration(300).start() }
@@ -191,6 +203,7 @@ class NowPlayingActivity : Activity() {
         preview = intent.getStringExtra(EXTRA_PREVIEW)
         preview?.let { PreviewMode.begin(it) }
         applyPreviewSpeed(intent)
+        readRequests(intent)
 
         setContentView(buildContent())
         lastVolumeAt = ReceiverState.current.volumeAtMs
@@ -204,12 +217,44 @@ class NowPlayingActivity : Activity() {
         handler.postDelayed(orbitTick, ORBIT_STEP_MS)
         handler.postDelayed(driftTick, 1000)
         noteInteraction("start")
+        if (startIdle) {
+            // The screensaver would have started because nobody is there: begin where the idle ladder would be.
+            startIdle = false
+            lastInteraction = SystemClock.elapsedRealtime() - timeline.minimalAfterMs
+            setPresence(Presence.MINIMAL, instant = true)
+        }
         preview?.let { applyPreviewMode(it) }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        foreground = true
+        if (peekRequested) {
+            peekRequested = false
+            peekCloseAt = SystemClock.elapsedRealtime() + PEEK_CLOSE_MS
+            handler.removeCallbacks(closePeek)
+            handler.postDelayed(closePeek, PEEK_CLOSE_MS)
+        }
+    }
+
+    override fun onPause() {
+        foreground = false
+        handler.removeCallbacks(closePeek)
+        peekCloseAt = 0L
+        super.onPause()
+    }
+
+    /** What the service asked for when it started or re-fronted this screen: idle at once, and/or just a peek. */
+    private fun readRequests(intent: Intent) {
+        startIdle = intent.getBooleanExtra(EXTRA_IDLE, false)
+        // A peek only makes sense when the player was out of sight; if someone is in it, leave it alone.
+        peekRequested = intent.getBooleanExtra(EXTRA_PEEK, false) && !foreground
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        readRequests(intent)
         val mode = intent.getStringExtra(EXTRA_PREVIEW) ?: return
         preview = mode
         PreviewMode.begin(mode)
@@ -984,6 +1029,7 @@ class NowPlayingActivity : Activity() {
     private fun noteInteraction(reason: String) {
         lastInteraction = SystemClock.elapsedRealtime()
         peekUntil = 0L
+        peekCloseAt = 0L
         if (presence != Presence.ACTIVE) {
             Log.i(TAG, "wake from $presence: $reason")
             setPresence(Presence.ACTIVE)
@@ -1023,7 +1069,7 @@ class NowPlayingActivity : Activity() {
         else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
 
-    private fun setPresence(next: Presence) {
+    private fun setPresence(next: Presence, instant: Boolean = false) {
         if (next == presence) return
         val leavingDark = presence.isDark && (next == Presence.ACTIVE || next == Presence.DIM)
         presence = next
@@ -1044,8 +1090,8 @@ class NowPlayingActivity : Activity() {
             Presence.MINIMAL -> {
                 keepScreenOn(true)
                 stage.animate().cancel()
-                stage.animate().alpha(0f).setDuration(1800).start()
-                showAod()
+                if (instant) stage.alpha = 0f else stage.animate().alpha(0f).setDuration(1800).start()
+                showAod(instant)
             }
             Presence.BLACK -> {
                 // Nothing lit at all, but the screen stays on: the TV keeps its picture signal and its sound.
@@ -1070,7 +1116,7 @@ class NowPlayingActivity : Activity() {
                 goodnightView.animate().alpha(0.55f).setDuration(1500).start()
             }
         }
-        applyArtworkColors(artworkColors, animate = true)
+        applyArtworkColors(artworkColors, animate = !instant)
     }
 
     private fun renderAod(s: ReceiverState.Snapshot) {
@@ -1084,10 +1130,10 @@ class NowPlayingActivity : Activity() {
         aodBar.setFraction(fraction, false)
     }
 
-    private fun showAod() {
+    private fun showAod(instant: Boolean = false) {
         aod.visibility = View.VISIBLE
         aod.animate().cancel()
-        aod.animate().alpha(AOD_ALPHA).setDuration(1800).start()
+        if (instant) aod.alpha = AOD_ALPHA else aod.animate().alpha(AOD_ALPHA).setDuration(1800).start()
         placeAod(animate = false)
         updateProgress()
     }
@@ -1200,6 +1246,8 @@ class NowPlayingActivity : Activity() {
     companion object {
         const val EXTRA_PREVIEW = "preview"
         const val EXTRA_SPEED = "speed"
+        const val EXTRA_IDLE = "idle"
+        const val EXTRA_PEEK = "peek"
         private const val TAG = "AirPlayTV-Presence"
 
         private const val NEUTRAL_TOP = 0xFF17171A.toInt()
@@ -1236,6 +1284,7 @@ class NowPlayingActivity : Activity() {
 
         // Burn-in care: when each stage starts, and how the layout drifts.
         private const val PEEK_MS = 8000L
+        private const val PEEK_CLOSE_MS = 6000L
         private const val DIM_ALPHA = 0.35f
         private const val AOD_ALPHA = 0.7f
         private const val ORBIT_STEP_MS = 10_000L

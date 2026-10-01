@@ -81,6 +81,9 @@
     <string name="dialog_lyrics_title">Lyrics</string>
     <string name="dialog_lyrics_message">With Lyrics on, the title and artist of the song that is playing are sent to lrclib.net to find its lyrics. Nothing else leaves this TV.\n\nWhile a song plays, press Down on the remote to see the lyrics and Up or Back to close them.</string>
     <string name="setting_sleep">Sleep After Music</string>
+    <string name="setting_return">Return To Player</string>
+    <string name="dialog_return_title">Return To Player</string>
+    <string name="dialog_return_message">While music plays, the player comes back by itself when the screensaver would start. Pressing play, pause, next or previous on the remote while the player is hidden shows it for a few seconds.</string>
     <string name="value_minutes">%1$d min</string>
     <string name="value_needs_setup">Needs setup</string>
     <string name="dialog_sleep_title">Sleep After Music</string>

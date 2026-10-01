@@ -23,8 +23,8 @@ class Settings(context: Context) {
      */
     enum class Appearance(val key: String, val model: String, val sourceVersion: String) {
         APPLE_TV("apple_tv", "AppleTV3,2", "220.68"),
-        APPLE_TV_4K("apple_tv_4k", "AppleTV6,2", "380.20.1"),
-        TV("tv", "FireTV", "220.68");
+        TV("tv", "FireTV", "220.68"),
+        APPLE_TV_4K("apple_tv_4k", "AppleTV6,2", "380.20.1");
 
         fun next(): Appearance = entries[(ordinal + 1) % entries.size]
 
@@ -87,6 +87,14 @@ class Settings(context: Context) {
         get() = prefs.getString(KEY_DECODER, "") ?: ""
         set(value) = prefs.edit().putString(KEY_DECODER, value).apply()
 
+    /**
+     * Bring the player back by itself: when the screensaver would start while music plays, and for a few
+     * seconds when a media key is pressed on the remote while the player is not showing.
+     */
+    var returnToPlayer: Boolean
+        get() = prefs.getBoolean(KEY_RETURN, true)
+        set(value) = prefs.edit().putBoolean(KEY_RETURN, value).apply()
+
     /** What the receiver says it is to an iPhone. */
     var appearance: Appearance
         get() = Appearance.fromKey(prefs.getString(KEY_APPEARANCE, null))
@@ -106,6 +114,7 @@ class Settings(context: Context) {
         const val KEY_LYRICS = "lyrics"
         const val KEY_SLEEP = "sleep_after_minutes"
         const val KEY_APPEARANCE = "appearance"
+        const val KEY_RETURN = "return_to_player"
 
         /** The choices offered for Sleep After Music; 0 is off. */
         val SLEEP_CHOICES = listOf(0, 2, 5, 10, 20)

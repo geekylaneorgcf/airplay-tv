@@ -13,7 +13,7 @@ package io.github.besliky.airplaytv.ui
  */
 class PresenceTimeline(
     private val dimAfterMs: Long,
-    private val minimalAfterMs: Long,
+    val minimalAfterMs: Long,
     private val blackAfterMs: Long,
     private val blankAfterPausedMs: Long,
 ) {
