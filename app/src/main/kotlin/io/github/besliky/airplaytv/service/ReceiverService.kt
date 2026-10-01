@@ -502,6 +502,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
     }
 
     override fun onProgress(start: Long, current: Long, end: Long) {
+        android.util.Log.i("AirPlayTV-NP", "progress start=$start current=$current end=$end rate=$audioSampleRate")
         // RTP timestamps wrap at 32 bits; differences are what matter.
         val rate = audioSampleRate.toLong().coerceAtLeast(1)
         val durationMs = ((end - start) and 0xFFFFFFFFL) * 1000 / rate
@@ -515,6 +516,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
     }
 
     override fun onPlaying(playing: Boolean) {
+        android.util.Log.i("AirPlayTV-NP", "onPlaying($playing)")
         ReceiverState.update {
             val now = SystemClock.elapsedRealtime()
             var position = it.positionMs

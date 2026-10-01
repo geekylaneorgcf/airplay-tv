@@ -235,6 +235,7 @@ void ap_frame(const uint8_t *data, size_t len, uint32_t rtp_ts, uint64_t remote_
     g_ap.paused = false;
     pthread_mutex_unlock(&g_ap.lock);
     if (resumed) {
+        LOG_W(AUDIO, "dbg audio resumed after flush");
         platform_on_playing(true);
     }
 }
@@ -245,6 +246,7 @@ void ap_flush(void) {
     if (g_ap.aac) {
         AMediaCodec_flush(g_ap.aac);
     }
+    LOG_W(AUDIO, "dbg ap_flush buffered_ms=%zu", g_ap.fill * 1000 / SAMPLE_RATE);
     bool was_playing = g_ap.active && !g_ap.paused;
     g_ap.paused = true;
     pthread_mutex_unlock(&g_ap.lock);

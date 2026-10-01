@@ -43,7 +43,9 @@ class NowPlayingActivity : Activity() {
     private lateinit var progress: ProgressBar
     private lateinit var elapsedView: TextView
     private lateinit var totalView: TextView
-    private lateinit var statusView: TextView
+    private lateinit var previousButton: ImageView
+    private lateinit var playPauseButton: ImageView
+    private lateinit var nextButton: ImageView
     private lateinit var content: View
 
     private val handler = Handler(Looper.getMainLooper())
@@ -143,18 +145,12 @@ class NowPlayingActivity : Activity() {
         column.addView(artistView, wrapWidth().apply { topMargin = dp(8) })
         column.addView(albumView, wrapWidth().apply { topMargin = dp(4) })
 
-        statusView = label(20f, R.color.text_secondary, bold = true, lines = 1).apply {
-            text = getString(R.string.now_playing_paused)
-            visibility = View.INVISIBLE
-        }
-        column.addView(statusView, wrapWidth().apply { topMargin = dp(24) })
-
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = PROGRESS_MAX
             progressTintList = ColorStateList.valueOf(getColor(R.color.text_primary))
             progressBackgroundTintList = ColorStateList.valueOf(getColor(R.color.surface))
         }
-        column.addView(progress, wrapWidth().apply { topMargin = dp(8) })
+        column.addView(progress, wrapWidth().apply { topMargin = dp(40) })
 
         val times = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         elapsedView = label(18f, R.color.text_secondary, bold = false, lines = 1)
@@ -166,8 +162,36 @@ class NowPlayingActivity : Activity() {
         root.addView(column, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
             marginStart = dp(56)
         })
+        previousButton = transportIcon(R.drawable.ic_skip_previous)
+        playPauseButton = transportIcon(R.drawable.ic_pause)
+        nextButton = transportIcon(R.drawable.ic_skip_next)
+        val transport = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        transport.addView(previousButton, LinearLayout.LayoutParams(dp(64), dp(64)))
+        transport.addView(playPauseButton, LinearLayout.LayoutParams(dp(72), dp(72)).apply {
+            marginStart = dp(32)
+            marginEnd = dp(32)
+        })
+        transport.addView(nextButton, LinearLayout.LayoutParams(dp(64), dp(64)))
+        column.addView(transport, wrapWidth().apply { topMargin = dp(28) })
+
         content = root
         return root
+    }
+
+    private fun transportIcon(drawable: Int) = ImageView(this).apply {
+        setImageResource(drawable)
+        scaleType = ImageView.ScaleType.FIT_CENTER
+        setPadding(dp(8), dp(8), dp(8), dp(8))
+    }
+
+    /** A short pulse acknowledges a remote key press before the sender has answered. */
+    private fun pulse(view: View) {
+        view.animate().scaleX(1.3f).scaleY(1.3f).setDuration(120).withEndAction {
+            view.animate().scaleX(1f).scaleY(1f).setDuration(120).start()
+        }.start()
     }
 
     private fun wrapWidth() =
@@ -188,7 +212,7 @@ class NowPlayingActivity : Activity() {
         albumView.text = s.album
         albumView.visibility = if (s.album.isBlank()) View.GONE else View.VISIBLE
         art.setImageBitmap(s.artwork)
-        statusView.visibility = if (s.playing) View.INVISIBLE else View.VISIBLE
+        playPauseButton.setImageResource(if (s.playing) R.drawable.ic_pause else R.drawable.ic_play)
         if (s.title != lastTitle) {
             lastTitle = s.title
             setDimmed(false)
@@ -230,7 +254,14 @@ class NowPlayingActivity : Activity() {
             KeyEvent.KEYCODE_DPAD_LEFT -> DacpClient.PREVIOUS
             else -> null
         } ?: return super.onKeyDown(keyCode, event)
-        if (event.repeatCount == 0) RemoteControl.send(command)
+        if (event.repeatCount == 0) {
+            RemoteControl.send(command)
+            pulse(when (command) {
+                DacpClient.NEXT -> nextButton
+                DacpClient.PREVIOUS -> previousButton
+                else -> playPauseButton
+            })
+        }
         return true
     }
 
