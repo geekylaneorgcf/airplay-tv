@@ -1109,7 +1109,6 @@ static void handle_set_parameter(airplay_server_t *s, conn_t *c, const rtsp_requ
     } else if (strncmp(text, "progress: ", 10) == 0 && s->ev.progress) {
         unsigned long start = 0, current = 0, end = 0;
         if (sscanf(text + 10, "%lu/%lu/%lu", &start, &current, &end) == 3) {
-        LOG_W(AIRPLAY, "dbg progress start=%lu current=%lu end=%lu", start, current, end);
             s->ev.progress(s->ev.ctx, (uint32_t) start, (uint32_t) current, (uint32_t) end);
         }
     }
@@ -1126,7 +1125,6 @@ static void handle_flush(airplay_server_t *s, conn_t *c, const rtsp_request_t *r
         long long v = parse_uint(digits, len, 0xffff);
         next_seq = (int) v;
     }
-    LOG_W(AIRPLAY, "dbg flush next_seq=%d", next_seq);
     if (c->session && c->session->audio) {
         audio_request_flush(c->session->audio, next_seq);
     }
@@ -1166,11 +1164,6 @@ static void handle_request(airplay_server_t *s, conn_t *c, const rtsp_request_t 
     const char *m = req->method;
     const char *url = req->url;
     bool rtsp = strcmp(req->protocol, "RTSP/1.0") == 0;
-
-    if (rtsp && strcmp(m, "OPTIONS") != 0) {
-        const char *dbg_ct = rtsp_header(req, "Content-Type");
-        LOG_W(AIRPLAY, "dbg rtsp %s ct=%s len=%zu", m, dbg_ct ? dbg_ct : "-", req->body_len);
-    }
 
     const char *dacp_id = rtsp_header(req, "DACP-ID");
     const char *active_remote = rtsp_header(req, "Active-Remote");

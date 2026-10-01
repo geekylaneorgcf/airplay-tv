@@ -56,7 +56,9 @@ static struct {
     size_t max_frames;
     bool prebuffering;
     int64_t pts_us;
-    bool paused;           /* flushed and no audio since: the sender paused or seeked */
+    bool had_data;         /* audio has reached the speakers in this session */
+    bool starved;          /* the supply ran dry for STARVE_MS: the sender paused */
+    int64_t empty_since_ms; /* monotonic time the supply last ran dry, 0 while audio flows */
 } g_ap = { .lock = PTHREAD_MUTEX_INITIALIZER, .cond = PTHREAD_COND_INITIALIZER };
 
 static const uint8_t kAscAacEld[] = { 0xf8, 0xe8, 0x50, 0x00 };  /* ELD, 44.1 kHz, stereo, 480 */
@@ -170,7 +172,9 @@ bool ap_start(const audio_format_t *format) {
         pthread_mutex_unlock(&g_ap.lock);
         return false;
     }
-    g_ap.paused = false;
+    g_ap.had_data = false;
+    g_ap.starved = false;
+    g_ap.empty_since_ms = 0;
     g_ap.active = true;
     pthread_mutex_unlock(&g_ap.lock);
     LOG_I(AUDIO, "audio output started (%s)", format->ct == AUDIO_CT_ALAC ? "ALAC"
@@ -231,13 +235,7 @@ void ap_frame(const uint8_t *data, size_t len, uint32_t rtp_ts, uint64_t remote_
         drain_aac_locked();
     }
     (void) rtp_ts;
-    bool resumed = g_ap.paused;
-    g_ap.paused = false;
     pthread_mutex_unlock(&g_ap.lock);
-    if (resumed) {
-        LOG_W(AUDIO, "dbg audio resumed after flush");
-        platform_on_playing(true);
-    }
 }
 
 void ap_flush(void) {
@@ -246,13 +244,7 @@ void ap_flush(void) {
     if (g_ap.aac) {
         AMediaCodec_flush(g_ap.aac);
     }
-    LOG_W(AUDIO, "dbg ap_flush buffered_ms=%zu", g_ap.fill * 1000 / SAMPLE_RATE);
-    bool was_playing = g_ap.active && !g_ap.paused;
-    g_ap.paused = true;
     pthread_mutex_unlock(&g_ap.lock);
-    if (was_playing) {
-        platform_on_playing(false);
-    }
 }
 
 void ap_volume(float db) {
@@ -287,6 +279,42 @@ void ap_stop(void) {
     }
 }
 
+/* A sender that pauses does not send a FLUSH; it simply stops sending audio. So "paused" is
+ * defined by what the speakers get: no audio for STARVE_MS. */
+#define STARVE_MS 300
+
+static int64_t monotonic_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t) ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+/* Lock held, nothing to play. Returns true when this makes the supply count as paused. */
+static bool note_dry_locked(void) {
+    if (!g_ap.had_data || g_ap.starved) {
+        return false;
+    }
+    int64_t now = monotonic_ms();
+    if (g_ap.empty_since_ms == 0) {
+        g_ap.empty_since_ms = now;
+        return false;
+    }
+    if (now - g_ap.empty_since_ms < STARVE_MS) {
+        return false;
+    }
+    g_ap.starved = true;
+    return true;
+}
+
+/* Lock held, audio was delivered. Returns true when this ends a pause. */
+static bool note_data_locked(void) {
+    g_ap.had_data = true;
+    g_ap.empty_since_ms = 0;
+    bool resumed = g_ap.starved;
+    g_ap.starved = false;
+    return resumed;
+}
+
 int ap_read(uint8_t *out, int max_bytes, int timeout_ms) {
     struct timespec deadline;
     clock_gettime(CLOCK_REALTIME, &deadline);
@@ -305,7 +333,12 @@ int ap_read(uint8_t *out, int max_bytes, int timeout_ms) {
         return -1;
     }
     if (g_ap.fill == 0 || g_ap.prebuffering) {
+        bool paused = note_dry_locked();
         pthread_mutex_unlock(&g_ap.lock);
+        if (paused) {
+            LOG_I(AUDIO, "no audio from the sender: paused");
+            platform_on_playing(false);
+        }
         return 0;
     }
     size_t frames = (size_t) max_bytes / FRAME_BYTES;
@@ -322,6 +355,11 @@ int ap_read(uint8_t *out, int max_bytes, int timeout_ms) {
     }
     g_ap.read_pos = (g_ap.read_pos + frames) % g_ap.ring_frames;
     g_ap.fill -= frames;
+    bool resumed = note_data_locked();
     pthread_mutex_unlock(&g_ap.lock);
+    if (resumed) {
+        LOG_I(AUDIO, "audio again: playing");
+        platform_on_playing(true);
+    }
     return (int) (frames * FRAME_BYTES);
 }

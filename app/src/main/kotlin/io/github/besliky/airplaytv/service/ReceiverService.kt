@@ -62,6 +62,8 @@ class ReceiverService : Service(), NativeBridge.Listener {
     private var wifiLock: WifiManager.WifiLock? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var audioSampleRate = 44100
+    private var lastProgressMs = -1L
+    private var lastProgressAt = 0L
     private var dacp: DacpClient? = null
     private var mediaSession: MediaSession? = null
     private var screenReceiverRegistered = false
@@ -443,6 +445,8 @@ class ReceiverService : Service(), NativeBridge.Listener {
         }
         dacp?.clear()
         releaseMediaSession()
+        lastProgressMs = -1
+        lastProgressAt = 0
         if (restartPending) restartReceiver() else updateIdleState()
     }
 
@@ -502,27 +506,32 @@ class ReceiverService : Service(), NativeBridge.Listener {
     }
 
     override fun onProgress(start: Long, current: Long, end: Long) {
-        android.util.Log.i("AirPlayTV-NP", "progress start=$start current=$current end=$end rate=$audioSampleRate")
         // RTP timestamps wrap at 32 bits; differences are what matter.
         val rate = audioSampleRate.toLong().coerceAtLeast(1)
         val durationMs = ((end - start) and 0xFFFFFFFFL) * 1000 / rate
         val positionMs = ((current - start) and 0xFFFFFFFFL) * 1000 / rate
         if (durationMs <= 0) return
+        val now = SystemClock.elapsedRealtime()
+        lastProgressMs = positionMs.coerceAtMost(durationMs)
+        lastProgressAt = now
         ReceiverState.update {
-            it.copy(durationMs = durationMs, positionMs = positionMs.coerceAtMost(durationMs),
-                positionAtMs = SystemClock.elapsedRealtime())
+            it.copy(durationMs = durationMs, positionMs = lastProgressMs, positionAtMs = now)
         }
         refreshMediaSession()
     }
 
     override fun onPlaying(playing: Boolean) {
-        android.util.Log.i("AirPlayTV-NP", "onPlaying($playing)")
         ReceiverState.update {
             val now = SystemClock.elapsedRealtime()
             var position = it.positionMs
-            // Freeze the position at the moment of the pause; resume counting from now.
-            if (position >= 0 && it.playing) {
-                position = (position + now - it.positionAtMs).coerceAtMost(it.durationMs.coerceAtLeast(0))
+            if (position >= 0 && it.playing && !playing) {
+                // A sender that pauses sends a progress update with the frozen position at that
+                // moment, a little before the audio runs dry. Prefer it to my own estimate.
+                position = if (lastProgressMs >= 0 && now - lastProgressAt <= PAUSE_PROGRESS_WINDOW_MS) {
+                    lastProgressMs
+                } else {
+                    (position + now - it.positionAtMs).coerceAtMost(it.durationMs.coerceAtLeast(0))
+                }
             }
             it.copy(playing = playing, positionMs = position, positionAtMs = now)
         }
@@ -596,6 +605,9 @@ class ReceiverService : Service(), NativeBridge.Listener {
     }
 
     companion object {
+        /** A progress update this recent before the audio ran dry is the pause position. */
+        private const val PAUSE_PROGRESS_WINDOW_MS = 2500L
+
         const val ACTION_STOP = "io.github.besliky.airplaytv.STOP"
         const val ACTION_DISCONNECT = "io.github.besliky.airplaytv.DISCONNECT"
         const val ACTION_RESTART = "io.github.besliky.airplaytv.RESTART"
