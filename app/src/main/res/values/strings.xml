@@ -122,7 +122,7 @@
     <string name="tv_trust_message">The TV at %1$s showed a certificate that no authority has signed, which is normal for an LG TV. Trust this one certificate, and nothing else, for the TV Settings Button?\n\nSHA-256 fingerprint:\n%2$s</string>
     <string name="tv_trust_confirm">Trust</string>
     <string name="tv_pairing_done_title">TV connected</string>
-    <string name="tv_pairing_done_message">Press the Menu button (the three bars next to Home) on the Fire TV remote to open the TV’s quick settings: picture mode, sound output and more. It works while the player is open. To use it in every app, switch on the Menu button service next.</string>
+    <string name="tv_pairing_done_message">Press the Menu button (the three bars next to Home) on the Fire TV remote to open the TV’s quick settings: picture mode, sound output and more. Use the arrow keys, OK and Back to steer that menu, and Menu to close it. It works while the player is open. To use it in every app, switch on the Menu button service next.</string>
     <string name="tv_pairing_failed_title">TV not connected</string>
     <string name="tv_pairing_not_found">No LG TV answered on this network. Make sure the TV is on and on the same network as this stick. If it is, type its address next (the TV shows it under Settings, Network).</string>
     <string name="tv_address_title">TV address</string>
@@ -136,6 +136,7 @@
     <string name="menu_setup_title">Menu button in every app</string>
     <string name="menu_setup_intro">So that the Menu button opens the TV’s settings in any app, and not only in the player, it has to be taken before the app sees it. Android only allows that through an accessibility service, switched on once from a computer. Run these two commands:</string>
     <string name="menu_setup_outro">The commands keep any accessibility services that are already on. The service looks at the Menu key only, reads no screen content, and lets every key through while the TV Settings Button is off.</string>
+    <string name="tv_menu_keys">TV menu: arrows and OK steer it, Back goes back, Menu closes it</string>
     <string name="tv_menu_needs_setup">Set up the TV Settings Button in AirPlay TV first</string>
     <string name="tv_menu_accept">Accept the request on your TV, using the TV’s own remote</string>
     <string name="tv_menu_declined">The TV did not accept AirPlay TV. Set the TV Settings Button up again</string>

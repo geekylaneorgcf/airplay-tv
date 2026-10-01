@@ -55,6 +55,9 @@
 - TV Settings Button: the search for the TV now also asks every address of the local network directly (some devices do not carry
   multicast answers), holds a multicast lock while it looks, and when nothing answers it asks for the TV's address instead of
   ending in a message.
+- TV Settings Button: the menu can now be used. The arrow keys, OK and Back of the Fire remote go to the stick, not to the TV, so the
+  menu opened and then did not react. While it is open those keys are forwarded to the TV as its own buttons (over the open button
+  socket, so a held arrow key scrolls); Menu again closes it, and ten seconds without a key give the keys back to the stick.
 - Lyrics follow what is heard: the receiver compares the position the sender reports with the position of the newest audio packet
   minus what is still queued (ring and output buffer), keeps the median of the last measurements and shifts the lyrics by it. New
   setting Lyrics Timing (Automatic, or 0.25 s steps earlier or later up to 2 s) for songs cut differently from their lyrics. The

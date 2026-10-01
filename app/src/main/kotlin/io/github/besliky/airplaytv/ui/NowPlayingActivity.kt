@@ -34,7 +34,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import io.github.besliky.airplaytv.R
 import io.github.besliky.airplaytv.Settings
-import io.github.besliky.airplaytv.lg.TvSettings
+import io.github.besliky.airplaytv.lg.TvMenuMode
 import io.github.besliky.airplaytv.service.ArtworkColors
 import io.github.besliky.airplaytv.service.DacpClient
 import io.github.besliky.airplaytv.service.ReceiverState
@@ -1054,6 +1054,8 @@ class NowPlayingActivity : Activity() {
     // ---------------------------------------------------------------- keys
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        // while the TV's menu is open the arrow keys, OK and Back steer it
+        if (TvMenuMode.isActive && TvMenuMode.onKey(this, event)) return true
         if (presence == Presence.GOODNIGHT) {
             // Someone is here after all: stay awake and go back to the home screen.
             ReceiverState.update { it.copy(wokeDevice = false) }
@@ -1068,7 +1070,7 @@ class NowPlayingActivity : Activity() {
             KeyEvent.KEYCODE_MENU -> {
                 if (settings.tvMenuButton) {
                     // the Menu button belongs to the TV's quick settings; this app's own settings are in the Apps list
-                    if (event.repeatCount == 0) TvSettings.open(this)
+                    if (event.repeatCount == 0) TvMenuMode.toggle(this)
                 } else {
                     startActivity(Intent(this, MainActivity::class.java).putExtra(MainActivity.EXTRA_STAY, true))
                 }
@@ -1108,6 +1110,7 @@ class NowPlayingActivity : Activity() {
     }
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        if (TvMenuMode.isActive && TvMenuMode.onKey(this, event)) return true
         if (scanning && keyCode == scanKey) {
             stopScanning()
             return true

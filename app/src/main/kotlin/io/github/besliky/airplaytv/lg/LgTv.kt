@@ -91,6 +91,26 @@ class LgTv(private val connector: Connector, private val settleMs: Long = 200) {
     }
 
     private fun talk(tv: Connection, clientKey: String?, button: String?, onPrompt: () -> Unit): Outcome {
+        val key = when (val handshake = handshake(tv, clientKey, onPrompt)) {
+            is Handshake.Registered -> handshake.key
+            is Handshake.Stopped -> return handshake.outcome
+        }
+        if (button == null) return Outcome.Done(key)
+        buttonSocket(tv).use { input ->
+            input.send(buttonMessage(button))
+            // the TV acts on a button when it arrives; closing at once can drop it
+            if (settleMs > 0) Thread.sleep(settleMs)
+        }
+        return Outcome.Done(key)
+    }
+
+    private sealed class Handshake {
+        class Registered(val key: String) : Handshake()
+        class Stopped(val outcome: Outcome) : Handshake()
+    }
+
+    /** Hello, system info and registration: what has to happen before the TV takes any request. */
+    private fun handshake(tv: Connection, clientKey: String?, onPrompt: () -> Unit): Handshake {
         tv.send(HELLO)
         readUntil(tv, REPLY_TIMEOUT_MS) { it.optString("type") == "hello" }
         // newer webOS wants the system info before it will register a client
@@ -98,27 +118,81 @@ class LgTv(private val connector: Connector, private val settleMs: Long = 200) {
         readUntil(tv, REPLY_TIMEOUT_MS) { it.optString("id") == "get_sys_info" }
 
         tv.send(registerMessage(clientKey))
-        val key = when (val registration = awaitRegistration(tv, onPrompt)) {
-            is Registration.Key -> registration.value
-            Registration.Declined -> return Outcome.Declined
-            Registration.NoAnswer -> return Outcome.NoAnswer
+        return when (val registration = awaitRegistration(tv, onPrompt)) {
+            is Registration.Key -> Handshake.Registered(registration.value)
+            Registration.Declined -> Handshake.Stopped(Outcome.Declined)
+            Registration.NoAnswer -> Handshake.Stopped(Outcome.NoAnswer)
         }
-        if (button == null) return Outcome.Done(key)
+    }
 
+    /** Asks the registered TV for its button socket and opens it. Throws [IOException] when the TV will not give one. */
+    private fun buttonSocket(tv: Connection): Connection {
         tv.send(request("sock", "ssap://com.webos.service.networkinput/getPointerInputSocket"))
         val reply = readUntil(tv, REPLY_TIMEOUT_MS) { it.optString("id") == "sock" }
         val payload = reply.optJSONObject("payload")
         if (reply.optString("type") == "error" || payload == null || !payload.optBoolean("returnValue", false)) {
-            return Outcome.Failed("the TV would not open its button socket: ${reply.optString("error")}")
+            throw IOException("the TV would not open its button socket: ${reply.optString("error")}")
         }
         val target = parseSocketPath(payload.getString("socketPath"), fallbackHost = null)
-            ?: return Outcome.Failed("the TV's button socket address was not understood")
-        connector.open(target.host, target.port, target.secure, target.path).use { input ->
-            input.send("type:button\nname:$button\n\n")
-            // the TV acts on a button when it arrives; closing at once can drop it
-            if (settleMs > 0) Thread.sleep(settleMs)
+            ?: throw IOException("the TV's button socket address was not understood")
+        return connector.open(target.host, target.port, target.secure, target.path)
+    }
+
+    /** A button socket that stays open for several presses, as when someone steers the TV's menu with the arrow keys. */
+    class Remote internal constructor(private val main: Connection, private val buttons: Connection, val clientKey: String) : Closeable {
+        /** Presses [button] (`UP`, `DOWN`, `LEFT`, `RIGHT`, `ENTER`, `BACK`, `EXIT`, `MENU`, ...). Throws [IOException] when the TV is gone. */
+        fun press(button: String) = buttons.send(buttonMessage(button))
+
+        override fun close() {
+            try {
+                buttons.close()
+            } finally {
+                main.close()
+            }
         }
-        return Outcome.Done(key)
+    }
+
+    sealed class RemoteResult {
+        class Ready(val remote: Remote) : RemoteResult()
+        class Stopped(val outcome: Outcome) : RemoteResult()
+    }
+
+    /**
+     * Connects and registers like [press] but keeps the button socket open and hands it over. The caller closes it.
+     * Blocking: run it off the main thread.
+     */
+    fun openRemote(host: String, clientKey: String?, onPrompt: () -> Unit = {}): RemoteResult {
+        val main = try {
+            openMain(host)
+        } catch (e: TvTrust.Untrusted) {
+            return RemoteResult.Stopped(Outcome.Untrusted(e))
+        } catch (e: IOException) {
+            return RemoteResult.Stopped(Outcome.Unreachable(e.message ?: "no connection"))
+        }
+        try {
+            return when (val handshake = handshake(main, clientKey, onPrompt)) {
+                is Handshake.Stopped -> {
+                    main.close()
+                    RemoteResult.Stopped(handshake.outcome)
+                }
+                is Handshake.Registered -> RemoteResult.Ready(Remote(main, buttonSocket(main), handshake.key))
+            }
+        } catch (e: Exception) {
+            try {
+                main.close()
+            } catch (_: IOException) {
+                // already gone
+            }
+            return RemoteResult.Stopped(
+                when (e) {
+                    is TvTrust.Untrusted -> Outcome.Untrusted(e)
+                    is SocketTimeoutException -> Outcome.Failed("the TV did not answer")
+                    is IOException -> Outcome.Failed(e.message ?: "the connection failed")
+                    is JSONException -> Outcome.Failed("the TV sent something unexpected")
+                    else -> throw e
+                },
+            )
+        }
     }
 
     private sealed class Registration {
@@ -198,6 +272,8 @@ class LgTv(private val connector: Connector, private val settleMs: Long = 200) {
             if (!clientKey.isNullOrEmpty()) payload.put("client-key", clientKey)
             return JSONObject().put("type", "register").put("id", "register_0").put("payload", payload).toString()
         }
+
+        internal fun buttonMessage(button: String): String = "type:button\nname:$button\n\n"
 
         internal fun request(id: String, uri: String): String =
             JSONObject().put("id", id).put("type", "request").put("uri", uri).put("payload", JSONObject()).toString()

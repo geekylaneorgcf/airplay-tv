@@ -224,4 +224,53 @@ class LgTvTest {
         // a throwaway self-signed certificate, only here to have something for an Untrusted to carry
         const val CERT = "MIIDGzCCAgOgAwIBAgIUAaVdkXK3XRypazMWIYoHfQ3glI0wDQYJKoZIhvcNAQELBQAwHDEaMBgGA1UEAwwRQWlyUGxheSBUViB0ZXN0IGEwIBcNMjYxMDAxMTM1MTM4WhgPMjEyNjA5MDcxMzUxMzhaMBwxGjAYBgNVBAMMEUFpclBsYXkgVFYgdGVzdCBhMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqlb2G/C8XFGIG/0/w+2LWvHPZ3S+AF4GnRcaO9tLx3xzVQAONtAhekdFrAPkHTJa+5MY6QdFWCuI3qL+cl4OrfC44wUzjGgEHheq+3kYyVC+cI0q+u9kwN0dV4KnYHltp7dGx8BrYmgIJ8dUFkl2pLxTRBUdsbaCzx6vO7cHonIiBGO5N+7VeFji+90hwZnL9VSOIIQvREk7OGT8bGe0s2astngua2zNMJX40Gf/0VUeXqDP1eb4TOiBQ2ILmeM9jDfWyg+VyyOI7Qa4VlqMDCyMVpArEUSAUQkIaOMRSfOaJN2otGEMqEgmMPbOZ/l+IfFTyizVt2aO4Sw7Lif06QIDAQABo1MwUTAdBgNVHQ4EFgQUcvJoUCJJPCoFdUC+tSNbYzUMURcwHwYDVR0jBBgwFoAUcvJoUCJJPCoFdUC+tSNbYzUMURcwDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOCAQEAqPaSv6SLCzqYkAHKmKQHI3OzmaOJrP83BQ74rK3KV2/2v1NQA680h6L8CEWxUdd3tiCkwiAOJwwxL/iKAQ4vYR7WG6budTLSsqs9bt+kz3ix/HIler+2A0V8nFabCNfU9z+FTnRGqOduJ6jCfk/BUi8uU/uEdWrc0c4s9oT43quYs7gHuvQm1z4cIclhJubBik69v12IoS6FjL9Qv/vX3v9y5gNgHHHY4JzSr+ay0R1VmhFwNrdL09AzOpLOZZHg/xAyjzR58Fz79zV75TDJBUi+V/pfUYLzg1x0F5vyQqNJcQh7UhYBmEOejCst3nWUsvjVHrwfCJio817N+6EgAQ=="
     }
+
+    @Test
+    fun `a remote keeps the button socket open for several presses`() {
+        val main = friendlyTv(knownKey = "KEY-123")
+        val buttons = FakeTv { emptyList() }
+        val result = LgTv(connector(main, buttons), settleMs = 0).openRemote("192.168.1.86", "KEY-123")
+        val remote = (result as LgTv.RemoteResult.Ready).remote
+        assertEquals("KEY-123", remote.clientKey)
+        assertFalse("nothing is closed while the menu is being steered", main.closed || buttons.closed)
+        remote.press("DOWN")
+        remote.press("DOWN")
+        remote.press("ENTER")
+        assertEquals(
+            listOf("type:button\nname:DOWN\n\n", "type:button\nname:DOWN\n\n", "type:button\nname:ENTER\n\n"),
+            buttons.sent,
+        )
+        remote.close()
+        assertTrue(buttons.closed && main.closed)
+    }
+
+    @Test
+    fun `a remote that was declined closes what it opened and says why`() {
+        val tv = FakeTv { m ->
+            when (m.optString("type")) {
+                "hello" -> listOf(hello)
+                "request" -> listOf(sysInfo)
+                "register" -> listOf("""{"type":"error","id":"register_0","error":"403 User denied access"}""")
+                else -> emptyList()
+            }
+        }
+        val result = LgTv(connector(tv), settleMs = 0).openRemote("h", null)
+        assertEquals(LgTv.Outcome.Declined, (result as LgTv.RemoteResult.Stopped).outcome)
+        assertTrue(tv.closed)
+    }
+
+    @Test
+    fun `a TV that will not give a button socket leaves nothing open`() {
+        val tv = FakeTv { m ->
+            when (m.optString("type")) {
+                "hello" -> listOf(hello)
+                "request" -> if (m.optString("id") == "sock") listOf("""{"type":"error","id":"sock","error":"no"}""") else listOf(sysInfo)
+                "register" -> listOf(registered("K"))
+                else -> emptyList()
+            }
+        }
+        val result = LgTv(connector(tv), settleMs = 0).openRemote("h", "K")
+        assertTrue((result as LgTv.RemoteResult.Stopped).outcome is LgTv.Outcome.Failed)
+        assertTrue(tv.closed)
+    }
 }

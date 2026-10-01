@@ -4,8 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.content.Intent
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
-import io.github.besliky.airplaytv.Settings
-import io.github.besliky.airplaytv.lg.TvSettings
+import io.github.besliky.airplaytv.lg.TvMenuMode
 
 /**
  * Lets the Menu button (the three bars next to Home) open the LG TV's quick settings in every app. Android
@@ -33,10 +32,9 @@ class MenuKeyService : AccessibilityService() {
     override fun onInterrupt() = Unit
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
-        if (event.keyCode != KeyEvent.KEYCODE_MENU) return false
-        if (!Settings(this).tvMenuButton) return false
-        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) TvSettings.open(this)
-        return true // the press and its release belong to the TV now, not to the app in front
+        // Menu opens the TV's menu; while it is open the arrow keys, OK and Back steer it. Every other key is left alone.
+        if (event.keyCode != KeyEvent.KEYCODE_MENU && !TvMenuMode.isActive) return false
+        return TvMenuMode.onKey(this, event)
     }
 
     companion object {

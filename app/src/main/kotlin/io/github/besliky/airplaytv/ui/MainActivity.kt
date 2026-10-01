@@ -9,8 +9,10 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings as SystemSettings
+import android.view.KeyEvent
 import io.github.besliky.airplaytv.R
 import io.github.besliky.airplaytv.Settings
+import io.github.besliky.airplaytv.lg.TvMenuMode
 import io.github.besliky.airplaytv.lg.TvSettings
 import io.github.besliky.airplaytv.service.AccessibilitySetup
 import io.github.besliky.airplaytv.service.ReceiverService
@@ -140,6 +142,12 @@ class MainActivity : SettingsPage() {
         if (next > 0 && !SleepService.isEnabled) showSleepSetup()
     }
 
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // after "Open TV Settings Now" the arrow keys, OK and Back steer the TV's menu
+        if (TvMenuMode.isActive && TvMenuMode.onKey(this, event)) return true
+        return super.dispatchKeyEvent(event)
+    }
+
     private fun cycleLyricsTiming() {
         val choices = Settings.LYRICS_OFFSET_CHOICES
         settings.lyricsOffsetMs = choices[(choices.indexOf(settings.lyricsOffsetMs) + 1) % choices.size]
@@ -191,7 +199,7 @@ class MainActivity : SettingsPage() {
         )
         Dialogs.choose(this, R.string.tv_menu_title, items, 0) { index ->
             when (index) {
-                0 -> TvSettings.open(this)
+                0 -> TvMenuMode.toggle(this)
                 1 -> TvPairing.showEveryAppSetup(this)
                 2 -> {
                     settings.forgetTv()
