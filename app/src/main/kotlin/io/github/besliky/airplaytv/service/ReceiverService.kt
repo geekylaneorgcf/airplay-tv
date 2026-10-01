@@ -64,6 +64,8 @@ class ReceiverService : Service(), NativeBridge.Listener {
     private var audioSampleRate = 44100
     private var lastProgressMs = -1L
     private var lastProgressAt = 0L
+    private var prevAnchorMs = -1L
+    private var prevAnchorAt = 0L
     private var dacp: DacpClient? = null
     private var mediaSession: MediaSession? = null
     private var screenReceiverRegistered = false
@@ -447,6 +449,8 @@ class ReceiverService : Service(), NativeBridge.Listener {
         releaseMediaSession()
         lastProgressMs = -1
         lastProgressAt = 0
+        prevAnchorMs = -1
+        prevAnchorAt = 0
         if (restartPending) restartReceiver() else updateIdleState()
     }
 
@@ -514,6 +518,13 @@ class ReceiverService : Service(), NativeBridge.Listener {
         val now = SystemClock.elapsedRealtime()
         android.util.Log.i("AirPlayTV-NP", "progress t=$now start=$start current=$current end=$end posMs=$positionMs durMs=$durationMs " +
             "prevPos=${ReceiverState.current.positionMs}@${ReceiverState.current.positionAtMs} playing=${ReceiverState.current.playing}")
+        val before = ReceiverState.current
+        if (before.positionMs >= 0) {
+            prevAnchorMs = if (before.playing) before.positionMs + (now - before.positionAtMs) else before.positionMs
+            prevAnchorAt = now
+        } else {
+            prevAnchorMs = -1
+        }
         lastProgressMs = positionMs.coerceAtMost(durationMs)
         lastProgressAt = now
         ReceiverState.update {
@@ -527,17 +538,21 @@ class ReceiverService : Service(), NativeBridge.Listener {
             val now = SystemClock.elapsedRealtime()
             var position = it.positionMs
             if (position >= 0 && it.playing && !playing) {
-                // A sender that pauses sends a progress update with the frozen position at that
-                // moment, a little before the audio runs dry. Prefer it to my own estimate.
-                position = if (lastProgressMs >= 0 && now - lastProgressAt <= PAUSE_PROGRESS_WINDOW_MS) {
-                    lastProgressMs
+                // The audio ran dry PAUSE_DETECT_MS ago. A sender that pauses sends a progress
+                // update just before, and that update repeats a stale position (observed with
+                // YouTube Music: off by the whole time since the previous update). So when one
+                // arrived in the last moments, discard it and count from the position before it.
+                val dryAt = now - PAUSE_DETECT_MS
+                val recent = lastProgressAt > 0 && now - lastProgressAt <= PAUSE_PROGRESS_WINDOW_MS
+                position = if (recent && prevAnchorMs >= 0) {
+                    prevAnchorMs + (dryAt - prevAnchorAt)
                 } else {
-                    (position + now - it.positionAtMs).coerceAtMost(it.durationMs.coerceAtLeast(0))
+                    position + (dryAt - it.positionAtMs)
                 }
+                position = position.coerceIn(0L, it.durationMs.coerceAtLeast(0))
             }
             android.util.Log.i("AirPlayTV-NP", "onPlaying($playing) t=$now was=${it.positionMs}@${it.positionAtMs} " +
-                "extrapolated=${it.positionMs + now - it.positionAtMs} lastProgress=$lastProgressMs@$lastProgressAt " +
-                "chosen=$position dur=${it.durationMs}")
+                "lastProgress=$lastProgressMs@$lastProgressAt prevAnchor=$prevAnchorMs@$prevAnchorAt chosen=$position")
             it.copy(playing = playing, positionMs = position, positionAtMs = now)
         }
         refreshMediaSession()
@@ -610,8 +625,11 @@ class ReceiverService : Service(), NativeBridge.Listener {
     }
 
     companion object {
-        /** A progress update this recent before the audio ran dry is the pause position. */
-        private const val PAUSE_PROGRESS_WINDOW_MS = 2500L
+        /** Must match STARVE_MS in core/android/audio_pipeline.c: how long the audio was dry. */
+        private const val PAUSE_DETECT_MS = 300L
+
+        /** A progress update this recent before the audio ran dry was sent at the pause and is stale. */
+        private const val PAUSE_PROGRESS_WINDOW_MS = 1500L
 
         const val ACTION_STOP = "io.github.besliky.airplaytv.STOP"
         const val ACTION_DISCONNECT = "io.github.besliky.airplaytv.DISCONNECT"
