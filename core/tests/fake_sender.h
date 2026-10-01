@@ -31,6 +31,7 @@ typedef struct {
     struct sockaddr_in server;
     int cseq;
     char user_agent[64];
+    char extra_headers[160]; /* appended to every request, each line ending in \r\n */
 
     uint8_t ed_secret[ED25519_SECRET_SIZE];
     uint8_t ed_public[ED25519_KEY_SIZE];
@@ -80,6 +81,8 @@ int fs_send_video(fake_sender_t *f, const uint8_t *avcc_au, size_t len, uint64_t
 int fs_send_audio(fake_sender_t *f, const uint8_t *payload, size_t len, uint32_t samples);
 int fs_send_sync(fake_sender_t *f);
 int fs_set_volume(fake_sender_t *f, float db);
+/* Sends a SET_PARAMETER with an arbitrary content type. Returns 0 on a 200 reply. */
+int fs_set_parameter(fake_sender_t *f, const char *content_type, const void *body, size_t len);
 int fs_feedback(fake_sender_t *f);
 /* type 0 tears down the whole session. */
 int fs_teardown(fake_sender_t *f, int type);

@@ -114,6 +114,7 @@ int fs_request(fake_sender_t *f, const char *method, const char *url, const char
     if (content_type) {
         n += snprintf(head + n, sizeof(head) - (size_t) n, "Content-Type: %s\r\n", content_type);
     }
+    n += snprintf(head + n, sizeof(head) - (size_t) n, "%s", f->extra_headers);
     n += snprintf(head + n, sizeof(head) - (size_t) n, "Content-Length: %zu\r\n\r\n", len);
     if (send_all(f->fd, head, (size_t) n) != 0 || (len && send_all(f->fd, data, len) != 0)) {
         return -1;
@@ -752,6 +753,12 @@ int fs_set_volume(fake_sender_t *f, float db) {
     int status = 0;
     return fs_request(f, "SET_PARAMETER", "rtsp://127.0.0.1/1234", "text/parameters", text, (size_t) n, &status,
                       NULL, NULL) == 0 && status == 200 ? 0 : -1;
+}
+
+int fs_set_parameter(fake_sender_t *f, const char *content_type, const void *body, size_t len) {
+    int status = 0;
+    return fs_request(f, "SET_PARAMETER", "rtsp://127.0.0.1/1234", content_type, body, len, &status, NULL, NULL) == 0 &&
+                   status == 200 ? 0 : -1;
 }
 
 int fs_feedback(fake_sender_t *f) {

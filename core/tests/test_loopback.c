@@ -54,6 +54,21 @@ typedef struct {
     char pin[8];
     int paired;
     char paired_key[64];
+    int tracks;
+    char title[300];
+    char artist[64];
+    char album[64];
+    int artworks;
+    size_t artwork_len;
+    uint8_t artwork_first;
+    uint8_t artwork_last;
+    int progresses;
+    uint32_t progress_start;
+    uint32_t progress_current;
+    uint32_t progress_end;
+    int remotes;
+    char dacp_id[64];
+    char active_remote[64];
 } capture_t;
 
 static capture_t g_cap;
@@ -168,6 +183,45 @@ static void ev_paired(void *ctx, const char *key, const char *name) {
     pthread_mutex_unlock(&g_cap.lock);
 }
 
+static void ev_track_info(void *ctx, const char *title, const char *artist, const char *album) {
+    (void) ctx;
+    pthread_mutex_lock(&g_cap.lock);
+    str_copy(g_cap.title, sizeof(g_cap.title), title);
+    str_copy(g_cap.artist, sizeof(g_cap.artist), artist);
+    str_copy(g_cap.album, sizeof(g_cap.album), album);
+    g_cap.tracks++;
+    pthread_mutex_unlock(&g_cap.lock);
+}
+
+static void ev_artwork(void *ctx, const uint8_t *data, size_t len) {
+    (void) ctx;
+    pthread_mutex_lock(&g_cap.lock);
+    g_cap.artwork_len = len;
+    g_cap.artwork_first = len ? data[0] : 0;
+    g_cap.artwork_last = len ? data[len - 1] : 0;
+    g_cap.artworks++;
+    pthread_mutex_unlock(&g_cap.lock);
+}
+
+static void ev_progress(void *ctx, uint32_t start, uint32_t current, uint32_t end) {
+    (void) ctx;
+    pthread_mutex_lock(&g_cap.lock);
+    g_cap.progress_start = start;
+    g_cap.progress_current = current;
+    g_cap.progress_end = end;
+    g_cap.progresses++;
+    pthread_mutex_unlock(&g_cap.lock);
+}
+
+static void ev_remote(void *ctx, const char *dacp_id, const char *active_remote) {
+    (void) ctx;
+    pthread_mutex_lock(&g_cap.lock);
+    str_copy(g_cap.dacp_id, sizeof(g_cap.dacp_id), dacp_id);
+    str_copy(g_cap.active_remote, sizeof(g_cap.active_remote), active_remote);
+    g_cap.remotes++;
+    pthread_mutex_unlock(&g_cap.lock);
+}
+
 static const char *pin_source(void *ctx) {
     (void) ctx;
     static char pin[8];
@@ -201,6 +255,7 @@ static airplay_server_t *start_server(bool require_pin, int *port) {
     cfg.display_fps = 60;
     airplay_events_t ev = {
         .session_started = ev_started, .session_ended = ev_ended, .pin_display = ev_pin, .client_paired = ev_paired,
+        .track_info = ev_track_info, .artwork = ev_artwork, .progress = ev_progress, .remote = ev_remote,
     };
     airplay_server_t *s = airplay_server_create(&cfg, &ev, &kOps, NULL);
     if (!s) return NULL;
@@ -323,6 +378,89 @@ TEST(loopback_full_session_with_legacy_pairing) {
     CHECK(wait_for(&g_cap.sessions_ended, 1));
     CHECK(wait_for(&g_cap.audio_stops, 1));
     CHECK(!airplay_server_session_active(s));
+    fs_close(&f);
+    airplay_server_destroy(s);
+}
+
+/* Appends one DMAP item (4 byte tag, big-endian length, payload) and returns its size. */
+static size_t dmap_item(uint8_t *out, const char *tag, const void *data, size_t len) {
+    memcpy(out, tag, 4);
+    out[4] = (uint8_t) (len >> 24);
+    out[5] = (uint8_t) (len >> 16);
+    out[6] = (uint8_t) (len >> 8);
+    out[7] = (uint8_t) len;
+    if (len) memcpy(out + 8, data, len);
+    return 8 + len;
+}
+
+TEST(loopback_track_info_artwork_progress_and_remote_identity) {
+    int port = 0;
+    airplay_server_t *s = start_server(false, &port);
+    CHECK(s != NULL);
+    fake_sender_t f;
+    CHECK(fs_connect(&f, "127.0.0.1", (uint16_t) port) == 0);
+    snprintf(f.extra_headers, sizeof(f.extra_headers), "DACP-ID: 1A2B3C4D5E6F7081\r\nActive-Remote: 987654321\r\n");
+
+    /* mlit { mper (ignored), minm, asar, asal } with UTF-8 text */
+    uint8_t inner[256];
+    size_t n = 0;
+    const uint8_t mper[8] = { 0, 0, 0, 0, 0, 0, 0, 1 };
+    n += dmap_item(inner + n, "mper", mper, sizeof(mper));
+    n += dmap_item(inner + n, "minm", "Dil Lagiyan", 11);
+    n += dmap_item(inner + n, "asar", "Navaan Sandhu", 13);
+    n += dmap_item(inner + n, "asal", "Na\xc3\xafv", 5);
+    uint8_t body[300];
+    size_t total = dmap_item(body, "mlit", inner, n);
+    CHECK(fs_set_parameter(&f, "application/x-dmap-tagged", body, total) == 0);
+    CHECK(wait_for(&g_cap.tracks, 1));
+    CHECK(strcmp(g_cap.title, "Dil Lagiyan") == 0);
+    CHECK(strcmp(g_cap.artist, "Navaan Sandhu") == 0);
+    CHECK(strcmp(g_cap.album, "Na\xc3\xafv") == 0);
+
+    /* a length that runs past the end of the body must not read out of bounds */
+    const uint8_t broken[12] = { 'm', 'l', 'i', 't', 0xff, 0xff, 0xff, 0xf0, 'm', 'i', 'n', 'm' };
+    CHECK(fs_set_parameter(&f, "application/x-dmap-tagged", broken, sizeof(broken)) == 0);
+    CHECK(wait_for(&g_cap.tracks, 2));
+    CHECK_EQ(strlen(g_cap.title), 0);
+
+    /* an over-long title is cut at a character boundary, never in the middle of a UTF-8 sequence */
+    uint8_t longtext[1200];
+    memset(longtext, 'x', sizeof(longtext));
+    longtext[254] = 0xc3;  /* 2-byte sequence straddling the 255 byte limit */
+    longtext[255] = 0xa9;
+    uint8_t big[1300];
+    size_t big_n = dmap_item(big, "minm", longtext, sizeof(longtext));
+    CHECK(fs_set_parameter(&f, "application/x-dmap-tagged", big, big_n) == 0);
+    CHECK(wait_for(&g_cap.tracks, 3));
+    CHECK_EQ(strlen(g_cap.title), 254);  /* 255 bytes would end on the first half of the e-acute */
+
+    /* artwork */
+    uint8_t art[1000];
+    for (size_t i = 0; i < sizeof(art); i++) art[i] = (uint8_t) i;
+    CHECK(fs_set_parameter(&f, "image/jpeg", art, sizeof(art)) == 0);
+    CHECK(wait_for(&g_cap.artworks, 1));
+    CHECK_EQ(g_cap.artwork_len, sizeof(art));
+    CHECK_EQ(g_cap.artwork_first, 0);
+    CHECK_EQ(g_cap.artwork_last, (uint8_t) (sizeof(art) - 1));
+
+    /* progress in RTP timestamp units: start/current/end */
+    const char progress[] = "progress: 1000/45100/441000\r\n";
+    CHECK(fs_set_parameter(&f, "text/parameters", progress, sizeof(progress) - 1) == 0);
+    CHECK(wait_for(&g_cap.progresses, 1));
+    CHECK_EQ(g_cap.progress_start, 1000);
+    CHECK_EQ(g_cap.progress_current, 45100);
+    CHECK_EQ(g_cap.progress_end, 441000);
+
+    /* malformed progress is ignored */
+    const char bad[] = "progress: nonsense\r\n";
+    CHECK(fs_set_parameter(&f, "text/parameters", bad, sizeof(bad) - 1) == 0);
+
+    /* remote-control identity is reported once, however many requests carry it */
+    CHECK_EQ(g_cap.remotes, 1);
+    CHECK(strcmp(g_cap.dacp_id, "1A2B3C4D5E6F7081") == 0);
+    CHECK(strcmp(g_cap.active_remote, "987654321") == 0);
+    CHECK_EQ(g_cap.progresses, 1);
+
     fs_close(&f);
     airplay_server_destroy(s);
 }
