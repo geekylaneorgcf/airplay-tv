@@ -475,15 +475,10 @@ class ReceiverService : Service(), NativeBridge.Listener {
     }
 
     override fun onTrackInfo(title: String, artist: String, album: String) {
-        ReceiverState.update {
-            val changed = it.title != title || it.artist != artist || it.album != album
-            // A new track invalidates the old cover and position; the sender pushes them again.
-            if (changed) {
-                it.copy(title = title, artist = artist, album = album, artwork = null, durationMs = -1, positionMs = -1)
-            } else {
-                it
-            }
-        }
+        // Do not clear the cover or position here: senders do not push track info, artwork and
+        // progress in a fixed order, so clearing would wipe a cover that just arrived. A new
+        // track's artwork and progress replace the old ones when they come in.
+        ReceiverState.update { it.copy(title = title, artist = artist, album = album) }
     }
 
     override fun onArtwork(data: ByteArray) {
