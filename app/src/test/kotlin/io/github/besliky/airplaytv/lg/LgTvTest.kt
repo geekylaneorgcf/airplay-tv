@@ -129,10 +129,12 @@ class LgTvTest {
     fun `an untrusted certificate is reported and plain text is never used instead`() {
         val cert = TvTrust.decode(CERT)!!
         val calls = ArrayList<Opened>()
-        val outcome = LgTv { host, port, secure, path ->
-            calls += Opened(host, port, secure, path)
-            throw TvTrust.Untrusted(cert, IOException("not trusted"))
-        }.press("h", null, null)
+        val outcome = LgTv(
+            LgTv.Connector { host, port, secure, path ->
+                calls += Opened(host, port, secure, path)
+                throw TvTrust.Untrusted(cert, IOException("not trusted"))
+            },
+        ).press("h", null, null)
         assertTrue(outcome is LgTv.Outcome.Untrusted)
         assertEquals(cert, (outcome as LgTv.Outcome.Untrusted).error.certificate)
         assertEquals("one try over TLS, no fallback", 1, calls.size)
@@ -143,17 +145,19 @@ class LgTvTest {
     fun `a TV without TLS is spoken to in plain text on the old port`() {
         val tv = friendlyTv(knownKey = "K")
         val calls = ArrayList<Opened>()
-        val outcome = LgTv { host, port, secure, path ->
-            calls += Opened(host, port, secure, path)
-            if (secure) throw IOException("connection reset") else tv
-        }.press("h", "K", null)
+        val outcome = LgTv(
+            LgTv.Connector { host, port, secure, path ->
+                calls += Opened(host, port, secure, path)
+                if (secure) throw IOException("connection reset") else tv
+            },
+        ).press("h", "K", null)
         assertEquals(LgTv.Outcome.Done("K"), outcome)
         assertEquals(listOf(3001 to true, 3000 to false), calls.map { it.port to it.secure })
     }
 
     @Test
     fun `a TV that cannot be reached is reported as unreachable`() {
-        val outcome = LgTv { _, _, _, _ -> throw IOException("no route to host") }.press("h", null, null)
+        val outcome = LgTv(LgTv.Connector { _, _, _, _ -> throw IOException("no route to host") }).press("h", null, null)
         assertTrue(outcome is LgTv.Outcome.Unreachable)
     }
 
