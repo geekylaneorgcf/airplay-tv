@@ -394,6 +394,9 @@ class ReceiverService : Service(), NativeBridge.Listener {
 
     override fun onSessionStarted(clientName: String, clientModel: String) {
         Log.i(SESSION, "session started ($clientModel)")
+        // Audio-only senders (music apps) never open the playback screen, so wake the display
+        // here too; on a TV with HDMI-CEC this switches the TV on so the audio is heard.
+        wakeDisplay()
         acquireSessionLocks()
         ReceiverState.update {
             it.copy(status = Status.CONNECTED, clientName = clientName, clientModel = clientModel, pin = null)
