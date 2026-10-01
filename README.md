@@ -60,9 +60,11 @@ backdrop) to compare banding.
 
 ### Known limits
 - The icon an iPhone draws for this receiver is the Apple TV tile, because the receiver says it is an Apple TV. Saying anything
-  else (`FireTV` was tried) makes the iPhone connect over and over without ever starting a session: it needs a receiver that
-  speaks AirPlay 2 to be accepted as anything but an Apple TV. The core can advertise another model (`airplay_config_t.model`), the
-  app does not offer it.
+  else on the full service (`FireTV` was tried) makes the iPhone connect over and over without ever starting a session: it needs a
+  receiver that speaks AirPlay 2 to be accepted as anything but an Apple TV. Advanced > **Appears On iPhone As** has a trial for a
+  speaker icon: only the audio service is published, under a model iOS does not know (the way shairport-sync is drawn as a speaker),
+  so only music works, not screen mirroring or photos. It switches itself back to Apple TV after 30 minutes unless music has started
+  from an iPhone by then (that confirms it). Whether iOS accepts it can only be seen on a real iPhone.
 - YouTube and other apps' in-app **AirPlay video** (the cast button) is not supported (`POST /play` is refused and logged);
   Screen Mirroring is. Audio-only AirPlay from music apps is the main use.
 - Photos: implemented from the unofficial protocol notes and a loopback test; not yet verified against every iOS version. Slideshows are refused.

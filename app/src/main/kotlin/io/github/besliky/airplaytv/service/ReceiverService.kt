@@ -372,6 +372,27 @@ class ReceiverService : Service(), NativeBridge.Listener {
         acquireMulticastLock()
         publish()
         updateIdleState()
+        checkSpeakerTrial()
+    }
+
+    /**
+     * A speaker trial that has not seen music by its deadline is undone, so a receiver an iPhone refuses to use never stays
+     * that way: the owner would only see that nothing plays.
+     */
+    private val speakerTrialExpiry = Runnable { checkSpeakerTrial() }
+
+    private fun checkSpeakerTrial() {
+        handler.removeCallbacks(speakerTrialExpiry)
+        val until = settings.speakerTrialUntil
+        if (!settings.speakerMode || until <= 0L) return
+        val left = until - System.currentTimeMillis()
+        if (left <= 0L) {
+            Log.i(SESSION, "no music started while appearing as a speaker: back to Apple TV")
+            settings.speakerTrialUntil = 0L
+            settings.speakerMode = false
+        } else {
+            handler.postDelayed(speakerTrialExpiry, left + 500L)
+        }
     }
 
     private fun stopReceiver() {
@@ -426,13 +447,14 @@ class ReceiverService : Service(), NativeBridge.Listener {
             return
         }
         val name = settings.deviceName
+        val (airplayTxt, raopTxt) = Appearance.records(txt(raop = false), txt(raop = true), settings.speakerMode)
         advertiser.publish(
             Advertiser.Registration(
                 airplayName = name,
                 raopName = "${id.deviceIdHex}@$name",
                 port = port,
-                airplayTxt = txt(raop = false),
-                raopTxt = txt(raop = true),
+                airplayTxt = airplayTxt,
+                raopTxt = raopTxt,
             )
         )
     }
@@ -619,6 +641,11 @@ class ReceiverService : Service(), NativeBridge.Listener {
 
     override fun onSessionStarted(clientName: String, clientModel: String) {
         Log.i(SESSION, "session started ($clientModel)")
+        if (settings.speakerMode && settings.speakerTrialUntil > 0L) {
+            Log.i(SESSION, "music started while appearing as a speaker: the trial is over, it stays")
+            settings.speakerTrialUntil = 0L
+            handler.removeCallbacks(speakerTrialExpiry)
+        }
         // Audio-only senders (music apps) never open the playback screen, so wake the display
         // here too; on a TV with HDMI-CEC this switches the TV on so the audio is heard.
         ReceiverState.update { it.copy(wokeDevice = false) }

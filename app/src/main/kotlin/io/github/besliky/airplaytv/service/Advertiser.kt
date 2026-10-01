@@ -102,12 +102,13 @@ class Advertiser(context: Context) {
     private fun registerAll(reg: Registration) {
         state = State.REGISTERING
         active = reg
-        pending = 2
+        val withAirplay = reg.airplayTxt.isNotEmpty() // speaker mode publishes the audio service alone
+        pending = if (withAirplay) 2 else 1
         failed = false
         renamed = false
         val gen = ++generation
         listeners.clear()
-        register(gen, reg.airplayName, AIRPLAY_TYPE, reg.port, reg.airplayTxt)
+        if (withAirplay) register(gen, reg.airplayName, AIRPLAY_TYPE, reg.port, reg.airplayTxt)
         register(gen, reg.raopName, RAOP_TYPE, reg.port, reg.raopTxt)
         handler.postDelayed({
             if (generation == gen && state == State.REGISTERING) {

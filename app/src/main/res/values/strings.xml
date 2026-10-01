@@ -46,6 +46,13 @@
     <string name="setting_frame_rate">Frame Rate</string>
     <string name="setting_overlay">Performance Overlay</string>
     <string name="setting_logs">Detailed Logs</string>
+    <string name="setting_appear">Appears On iPhone As</string>
+    <string name="value_appear_apple_tv">Apple TV</string>
+    <string name="value_appear_speaker_trial">Speaker (trial)</string>
+    <string name="value_appear_speaker">Speaker</string>
+    <string name="dialog_appear_title">Try the speaker icon?</string>
+    <string name="dialog_appear_message">The iPhone draws a speaker instead of the Apple TV tile for a receiver that only offers music. With this on, only music works: screen mirroring and photos are not offered. If no music starts from your iPhone within 30 minutes, it switches back to Apple TV by itself. You can switch back here at any time.</string>
+    <string name="dialog_appear_confirm">Try It</string>
     <string name="setting_diagnostics">Export Diagnostics</string>
     <string name="setting_reset_pairing">Reset Pairing</string>
     <string name="setting_paired_devices">Paired Devices</string>

@@ -22,6 +22,7 @@ class AdvancedActivity : SettingsPage() {
     private lateinit var overlayRow: Row
     private lateinit var logsRow: Row
     private lateinit var pairedRow: Row
+    private lateinit var appearRow: Row
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -48,6 +49,7 @@ class AdvancedActivity : SettingsPage() {
             settings.verboseLogging = !settings.verboseLogging
             bind()
         }
+        appearRow = addRow(getString(R.string.setting_appear)) { toggleAppearance() }
         addRow(getString(R.string.setting_diagnostics)) { exportDiagnostics() }.navigates(true)
         pairedRow = addRow(getString(R.string.setting_paired_devices)) { showPairedDevices() }.navigates(true)
         addRow(getString(R.string.setting_reset_pairing)) { resetPairing() }
@@ -67,6 +69,33 @@ class AdvancedActivity : SettingsPage() {
         overlayRow.value(onOff(settings.performanceOverlay))
         logsRow.value(onOff(settings.verboseLogging))
         pairedRow.value(paired.count.toString())
+        appearRow.value(
+            when {
+                !settings.speakerMode -> getString(R.string.value_appear_apple_tv)
+                settings.speakerTrialUntil > 0L -> getString(R.string.value_appear_speaker_trial)
+                else -> getString(R.string.value_appear_speaker)
+            },
+        )
+    }
+
+    /** Apple TV is the default and works with everything; the speaker is a trial that undoes itself, see [Appearance]. */
+    private fun toggleAppearance() {
+        if (settings.speakerMode) {
+            settings.speakerTrialUntil = 0L
+            settings.speakerMode = false
+            bind()
+            return
+        }
+        Dialogs.confirm(this, R.string.dialog_appear_title, R.string.dialog_appear_message, R.string.dialog_appear_confirm) {
+            settings.speakerTrialUntil = System.currentTimeMillis() + SPEAKER_TRIAL_MS
+            settings.speakerMode = true
+            bind()
+        }
+    }
+
+    private companion object {
+        /** How long a speaker trial waits for music before it switches itself back. */
+        const val SPEAKER_TRIAL_MS = 30 * 60 * 1000L
     }
 
     private fun chooseDecoder() {

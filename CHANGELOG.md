@@ -44,6 +44,10 @@
   YouTube Music (plain text, not time-stamped; the same title/artist leave the TV, to Google this time). The match needs the
   same title and one of the artists, and a length within 45 s of the track's. It uses the YouTube Music website's own web
   interface, which is not documented and may change; when it does the lookup finds nothing. Off by default, with a dialog that says so.
+- Advanced > Appears On iPhone As: a trial for the speaker icon. Only the audio service is published, under a model iOS does not
+  know, so an iPhone draws a speaker like the other targets instead of the Apple TV tile; only music works then. It undoes itself
+  after 30 minutes unless music has started from an iPhone (a non-Apple model on the full service once made iOS refuse every
+  session, which is why this is a trial and not an option that can strand the receiver).
 - Preview mode `skip` plays three skips the way a real session delivers them, to check the song-change animation without a phone.
 - The burn-in drift was a glide that never stopped, so the player (and the photo viewer) redrew at 60 frames per second
   for as long as they were up, using most of the stick's GPU. It now moves in short hops, and the settled backdrop no

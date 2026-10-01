@@ -108,6 +108,19 @@ class Settings(context: Context) {
         prefs.edit().remove(KEY_LG_HOST).remove(KEY_LG_KEY).remove(KEY_LG_CERT).apply()
     }
 
+    /**
+     * Appear in the iPhone's AirPlay list as a speaker (music only) instead of an Apple TV, see [io.github.besliky.airplaytv.service.Appearance].
+     * Switched on as a trial: [speakerTrialUntil] is when it switches itself off again if no music has started by then.
+     */
+    var speakerMode: Boolean
+        get() = prefs.getBoolean(KEY_SPEAKER, false)
+        set(value) = prefs.edit().putBoolean(KEY_SPEAKER, value).apply()
+
+    /** Wall-clock milliseconds at which a speaker trial that has not been confirmed ends; 0 when there is no trial running. */
+    var speakerTrialUntil: Long
+        get() = prefs.getLong(KEY_SPEAKER_UNTIL, 0L)
+        set(value) = prefs.edit().putLong(KEY_SPEAKER_UNTIL, value).apply()
+
     fun registerListener(l: SharedPreferences.OnSharedPreferenceChangeListener) =
         prefs.registerOnSharedPreferenceChangeListener(l)
 
@@ -121,6 +134,8 @@ class Settings(context: Context) {
         const val KEY_NAME = "device_name"
         const val KEY_LYRICS = "lyrics"
         const val KEY_LYRICS_YTM = "lyrics_youtube_music"
+        const val KEY_SPEAKER = "appear_as_speaker"
+        const val KEY_SPEAKER_UNTIL = "appear_as_speaker_until"
         const val KEY_SLEEP = "sleep_after_minutes"
         const val KEY_RETURN = "return_to_player"
         const val KEY_TV_MENU = "tv_menu_button"
@@ -141,7 +156,7 @@ class Settings(context: Context) {
         const val KEY_DECODER = "preferred_decoder"
 
         /** Settings that require the receiver to be restarted when they change. */
-        val RESTART_KEYS = setOf(KEY_NAME, KEY_PIN, KEY_RESOLUTION, KEY_FPS, KEY_DECODER)
+        val RESTART_KEYS = setOf(KEY_NAME, KEY_PIN, KEY_RESOLUTION, KEY_FPS, KEY_DECODER, KEY_SPEAKER)
 
         /**
          * Normalises a device name: trims, drops control characters and limits the
