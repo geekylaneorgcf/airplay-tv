@@ -81,6 +81,8 @@ class LgTv(private val connector: Connector, private val settleMs: Long = 200) {
             return connector.open(host, WSS_PORT, true, "/")
         } catch (e: TvTrust.Untrusted) {
             throw e // never fall back to an unencrypted connection because of a certificate that was not accepted
+        } catch (e: SocketTimeoutException) {
+            throw e // nothing answered at all (the TV is off): the plain port would only cost the same wait again
         } catch (e: IOException) {
             return try {
                 connector.open(host, WS_PORT, false, "/")

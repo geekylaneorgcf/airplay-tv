@@ -273,4 +273,27 @@ class LgTvTest {
         assertTrue((result as LgTv.RemoteResult.Stopped).outcome is LgTv.Outcome.Failed)
         assertTrue(tv.closed)
     }
+
+    @Test
+    fun `a TV that does not answer at all is not tried again on the plain port`() {
+        val attempts = ArrayList<Int>()
+        val silent = LgTv.Connector { _, port, _, _ ->
+            attempts += port
+            throw SocketTimeoutException("connect timed out")
+        }
+        val result = LgTv(silent, settleMs = 0).openRemote("192.168.1.86", "K")
+        assertTrue((result as LgTv.RemoteResult.Stopped).outcome is LgTv.Outcome.Unreachable)
+        assertEquals("one wait, not two", listOf(3001), attempts)
+    }
+
+    @Test
+    fun `a TV that refuses the secure port is tried on the plain one`() {
+        val attempts = ArrayList<Int>()
+        val oldTv = LgTv.Connector { _, port, _, _ ->
+            attempts += port
+            throw IOException("connection refused")
+        }
+        LgTv(oldTv, settleMs = 0).openRemote("192.168.1.86", "K")
+        assertEquals(listOf(3001, 3000), attempts)
+    }
 }

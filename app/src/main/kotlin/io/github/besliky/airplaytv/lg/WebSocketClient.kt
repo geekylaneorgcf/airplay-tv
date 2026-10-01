@@ -138,10 +138,10 @@ class WebSocketClient private constructor(private val socket: Socket, private va
          * surfaces as [TvTrust.Untrusted] carrying the certificate that was shown, so that it can be put to the
          * owner; nothing is sent to a TV whose certificate was not accepted.
          */
-        fun connect(host: String, port: Int, secure: Boolean, path: String, trust: TvTrust, timeoutMs: Int = 6000): WebSocketClient {
+        fun connect(host: String, port: Int, secure: Boolean, path: String, trust: TvTrust, timeoutMs: Int = 6000, connectTimeoutMs: Int = timeoutMs): WebSocketClient {
             val raw = Socket()
             try {
-                raw.connect(InetSocketAddress(host, port), timeoutMs)
+                raw.connect(InetSocketAddress(host, port), connectTimeoutMs)
                 raw.soTimeout = timeoutMs
                 val socket: Socket = if (secure) {
                     val tls = trust.socketFactory.createSocket(raw, host, port, true) as SSLSocket

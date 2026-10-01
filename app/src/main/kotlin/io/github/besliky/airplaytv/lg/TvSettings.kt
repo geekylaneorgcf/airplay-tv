@@ -16,9 +16,14 @@ object TvSettings {
         else -> State.READY
     }
 
-    /** A connector that checks the TV's certificate against the one the owner pinned. */
-    fun connector(settings: Settings): LgTv.Connector {
+    /**
+     * A connector that checks the TV's certificate against the one the owner pinned. A TV that does not even
+     * accept a connection within [connectTimeoutMs] is treated as off.
+     */
+    fun connector(settings: Settings, connectTimeoutMs: Int = 6000): LgTv.Connector {
         val trust = TvTrust(TvTrust.decode(settings.lgCertificate))
-        return LgTv.Connector { host, port, secure, path -> WebSocketClient.connect(host, port, secure, path, trust) }
+        return LgTv.Connector { host, port, secure, path ->
+            WebSocketClient.connect(host, port, secure, path, trust, connectTimeoutMs = connectTimeoutMs)
+        }
     }
 }

@@ -23,12 +23,19 @@ object TvMenuMode {
     private const val TAG = "AirPlayTV-LG"
     private const val IDLE_MS = 10_000L
 
+    /** A TV that has not accepted a connection after this long is off; the owner is told at once and the keys stay the app's. */
+    private const val CONNECT_MS = 2_000
+
     private val worker = Executors.newSingleThreadExecutor { Thread(it, "lg-menu").apply { isDaemon = true } }
     private val main = Handler(Looper.getMainLooper())
 
-    /** True from the press of Menu until the mode ends; keys are taken while it is. */
+    /** True while the TV's menu is open and keys are forwarded; never while the TV is still being reached. */
     @Volatile
     private var active = false
+
+    /** True from the press of Menu until the TV answered or did not; the keys are the app's own meanwhile. */
+    @Volatile
+    private var connecting = false
 
     // only touched on the worker
     private var remote: LgTv.Remote? = null
@@ -76,15 +83,30 @@ object TvMenuMode {
             end("closed with the Menu button")
             return
         }
+        if (connecting) return
         val settings = Settings(app)
         if (TvSettings.state(settings) != TvSettings.State.READY) {
             toast(app, R.string.tv_menu_needs_setup)
             return
         }
-        active = true
-        main.removeCallbacks(idleEnd)
-        main.postDelayed(idleEnd, IDLE_MS)
-        worker.execute { start(app, settings) }
+        connecting = true
+        worker.execute {
+            try {
+                start(app, settings)
+            } finally {
+                connecting = false
+            }
+            // a TV that did not answer may have a new address; look for it now so that the next press has it
+            if (!active && settings.lgHost.isNotEmpty()) refreshAddress(settings)
+        }
+    }
+
+    private fun refreshAddress(settings: Settings) {
+        val found = LgDiscovery.find()
+        if (found != null && found != settings.lgHost) {
+            Log.i(TAG, "the TV is at a new address")
+            settings.lgHost = found
+        }
     }
 
     private fun send(button: String) {
@@ -122,54 +144,43 @@ object TvMenuMode {
     }
 
     private fun start(app: Context, settings: Settings) {
-        val tv = LgTv(TvSettings.connector(settings))
+        val tv = LgTv(TvSettings.connector(settings, CONNECT_MS))
         val key = settings.lgClientKey.ifEmpty { null }
         val stored = settings.lgHost
-        var result: LgTv.RemoteResult = if (stored.isNotEmpty()) {
+        val result = if (stored.isNotEmpty()) {
             tv.openRemote(stored, key) { toast(app, R.string.tv_menu_accept) }
         } else {
             LgTv.RemoteResult.Stopped(LgTv.Outcome.Unreachable("no address yet"))
         }
-        if (result is LgTv.RemoteResult.Stopped && result.outcome is LgTv.Outcome.Unreachable) {
-            // the TV may have a new address
-            val found = LgDiscovery.find()
-            if (found != null && found != stored) {
-                settings.lgHost = found
-                result = tv.openRemote(found, key) { toast(app, R.string.tv_menu_accept) }
-            }
-        }
-        when (val r = result) {
+        when (result) {
             is LgTv.RemoteResult.Ready -> {
-                if (!active) { // the owner pressed Menu again while it was connecting
-                    r.remote.close()
-                    return
-                }
-                if (r.remote.clientKey != settings.lgClientKey) settings.lgClientKey = r.remote.clientKey
+                if (result.remote.clientKey != settings.lgClientKey) settings.lgClientKey = result.remote.clientKey
                 try {
-                    r.remote.press(LgTv.MENU)
-                    remote = r.remote
-                    toast(app, R.string.tv_menu_keys)
+                    result.remote.press(LgTv.MENU)
                 } catch (e: IOException) {
                     Log.w(TAG, "the TV did not take the Menu button: ${e.message}")
-                    r.remote.close()
-                    active = false
+                    result.remote.close()
+                    toast(app, R.string.tv_menu_failed)
+                    return
                 }
+                remote = result.remote
+                active = true // from here the arrow keys, OK and Back steer the TV
+                main.removeCallbacks(idleEnd)
+                main.postDelayed(idleEnd, IDLE_MS)
+                toast(app, R.string.tv_menu_keys)
             }
-            is LgTv.RemoteResult.Stopped -> {
-                active = false
-                when (val outcome = r.outcome) {
-                    is LgTv.Outcome.Untrusted -> toast(app, R.string.tv_menu_certificate_changed)
-                    LgTv.Outcome.Declined, LgTv.Outcome.NoAnswer -> toast(app, R.string.tv_menu_declined)
-                    is LgTv.Outcome.Unreachable -> {
-                        Log.w(TAG, "TV not reachable: ${outcome.reason}")
-                        toast(app, R.string.tv_menu_unreachable)
-                    }
-                    is LgTv.Outcome.Failed -> {
-                        Log.w(TAG, "TV failed: ${outcome.reason}")
-                        toast(app, R.string.tv_menu_failed)
-                    }
-                    is LgTv.Outcome.Done -> Unit
+            is LgTv.RemoteResult.Stopped -> when (val outcome = result.outcome) {
+                is LgTv.Outcome.Untrusted -> toast(app, R.string.tv_menu_certificate_changed)
+                LgTv.Outcome.Declined, LgTv.Outcome.NoAnswer -> toast(app, R.string.tv_menu_declined)
+                is LgTv.Outcome.Unreachable -> {
+                    Log.w(TAG, "TV not reachable: ${outcome.reason}")
+                    toast(app, R.string.tv_menu_unreachable)
                 }
+                is LgTv.Outcome.Failed -> {
+                    Log.w(TAG, "TV failed: ${outcome.reason}")
+                    toast(app, R.string.tv_menu_failed)
+                }
+                is LgTv.Outcome.Done -> Unit
             }
         }
     }
