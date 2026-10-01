@@ -1110,6 +1110,7 @@ class NowPlayingActivity : Activity() {
             "blank" -> setPresence(Presence.BLANK)
             "goodnight" -> startGoodnight(5 * 60_000L)
             "lyrics" -> handler.postDelayed({ openLyrics() }, 700)
+            "lyricsnet" -> handler.postDelayed({ openLyrics() }, 4500)
         }
     }
 

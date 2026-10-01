@@ -11,6 +11,7 @@ import android.os.Looper
 import android.os.SystemClock
 import io.github.besliky.airplaytv.service.ArtworkColors
 import io.github.besliky.airplaytv.service.Lyrics
+import io.github.besliky.airplaytv.service.LyricsRepository
 import io.github.besliky.airplaytv.service.ReceiverState
 
 /**
@@ -63,10 +64,26 @@ object PreviewMode {
                 lyrics = demoLyrics(),
             )
         }
+        if (mode == "lyricsnet") lookUpLyricsForReal(first)
         if (mode == "volume") schedule(3000) { changeVolume(0.35f) }
         if (mode == "next" || mode == "previous") {
             val direction = if (mode == "next") 1 else -1
             schedule(6000) { changeTrack(if (direction > 0) 1 else 2, direction) }
+        }
+    }
+
+    /** Runs the real lookup (a request to lrclib.net with this made-up track's title and artist) to prove the network path. */
+    private fun lookUpLyricsForReal(track: Track) {
+        ReceiverState.update { it.copy(lyricsState = ReceiverState.LyricsState.LOADING, lyrics = null) }
+        LyricsRepository.load(track.title, track.artist, track.seconds * 1000, "preview") { result ->
+            handler.post {
+                ReceiverState.update {
+                    it.copy(
+                        lyricsState = if (result != null) ReceiverState.LyricsState.FOUND else ReceiverState.LyricsState.NOT_FOUND,
+                        lyrics = result,
+                    )
+                }
+            }
         }
     }
 
