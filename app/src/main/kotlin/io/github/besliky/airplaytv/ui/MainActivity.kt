@@ -29,6 +29,7 @@ class MainActivity : SettingsPage() {
     private lateinit var infoRow: Row
     private lateinit var autoOpenRow: Row
     private lateinit var lyricsRow: Row
+    private lateinit var ytmRow: Row
     private lateinit var sleepRow: Row
     private lateinit var returnRow: Row
     private lateinit var tvMenuRow: Row
@@ -61,6 +62,7 @@ class MainActivity : SettingsPage() {
         }
         autoOpenRow = addRow(getString(R.string.setting_auto_open)) { requestAutoOpen() }
         lyricsRow = addRow(getString(R.string.setting_lyrics)) { toggleLyrics() }
+        ytmRow = addRow(getString(R.string.setting_lyrics_ytm)) { toggleYoutubeMusicLyrics() }
         sleepRow = addRow(getString(R.string.setting_sleep)) { cycleSleep() }
         returnRow = addRow(getString(R.string.setting_return)) { toggleReturn() }
         tvMenuRow = addRow(getString(R.string.setting_tv_menu)) { configureTvMenu() }
@@ -196,6 +198,13 @@ class MainActivity : SettingsPage() {
         }
     }
 
+    private fun toggleYoutubeMusicLyrics() {
+        settings.lyricsYoutubeMusic = !settings.lyricsYoutubeMusic
+        if (settings.lyricsYoutubeMusic) {
+            Dialogs.message(this, getString(R.string.dialog_lyrics_ytm_title), getString(R.string.dialog_lyrics_ytm_message))
+        }
+    }
+
     private fun toggleLyrics() {
         settings.lyricsEnabled = !settings.lyricsEnabled
         if (settings.lyricsEnabled) {
@@ -234,6 +243,7 @@ class MainActivity : SettingsPage() {
         pinRow.value(onOff(settings.requirePin))
         autostartRow.value(onOff(settings.startAutomatically))
         lyricsRow.value(onOff(settings.lyricsEnabled))
+        ytmRow.value(onOff(settings.lyricsYoutubeMusic)).visible(settings.lyricsEnabled)
         sleepRow.value(sleepValue())
         returnRow.value(onOff(settings.returnToPlayer))
         tvMenuRow.value(tvMenuValue())

@@ -40,6 +40,10 @@
   certificate the owner confirmed is trusted. In every app with the new Menu button service, an accessibility service that sees
   the Menu key only; the setup shows the commands, built to keep services that are already on.
 - The Sleep After Music setup command now keeps accessibility services that are already on instead of replacing them.
+- Lyrics: an opt-in second source. With "YouTube Music Lyrics" on, a song lrclib.net has no lyrics for is also looked up on
+  YouTube Music (plain text, not time-stamped; the same title/artist leave the TV, to Google this time). The match needs the
+  same title and one of the artists, and a length within 45 s of the track's. It uses the YouTube Music website's own web
+  interface, which is not documented and may change; when it does the lookup finds nothing. Off by default, with a dialog that says so.
 - Preview mode `skip` plays three skips the way a real session delivers them, to check the song-change animation without a phone.
 - The burn-in drift was a glide that never stopped, so the player (and the photo viewer) redrew at 60 frames per second
   for as long as they were up, using most of the stick's GPU. It now moves in short hops, and the settled backdrop no

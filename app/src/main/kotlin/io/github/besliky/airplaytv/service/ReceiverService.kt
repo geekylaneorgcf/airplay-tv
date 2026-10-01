@@ -193,7 +193,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
      * saying "Looking for lyrics…", before it is reported as unavailable.
      */
     private fun lookUpLyrics(token: Int, title: String, artist: String, durationMs: Long, attempt: Int) {
-        LyricsRepository.load(title, artist, durationMs, BuildConfig.VERSION_NAME) { outcome ->
+        LyricsRepository.load(title, artist, durationMs, BuildConfig.VERSION_NAME, settings.lyricsYoutubeMusic) { outcome ->
             handler.post {
                 if (token != lyricsToken) return@post // another track was requested meanwhile
                 when (outcome) {

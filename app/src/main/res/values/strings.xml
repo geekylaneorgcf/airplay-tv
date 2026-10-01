@@ -74,6 +74,9 @@
     <string name="setting_lyrics">Lyrics</string>
     <string name="dialog_lyrics_title">Lyrics</string>
     <string name="dialog_lyrics_message">With Lyrics on, the title and artist of the song that is playing are sent to lrclib.net to find its lyrics. Nothing else leaves this TV.\n\nWhile a song plays, press Down on the remote to see the lyrics and Up or Back to close them.</string>
+    <string name="setting_lyrics_ytm">YouTube Music Lyrics</string>
+    <string name="dialog_lyrics_ytm_title">YouTube Music Lyrics</string>
+    <string name="dialog_lyrics_ytm_message">When lrclib.net has no lyrics for a song, its title and artist are also sent to YouTube Music (Google) to look for them there. They come as plain text, not in time with the song, and the lookup uses the same unofficial web interface as the YouTube Music website, so it may stop working without notice.\n\nTurn it off again here at any time.</string>
     <string name="setting_sleep">Sleep After Music</string>
     <string name="setting_return">Return To Player</string>
     <string name="dialog_return_title">Return To Player</string>

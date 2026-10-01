@@ -28,6 +28,11 @@ class Settings(context: Context) {
         get() = prefs.getBoolean(KEY_LYRICS, false)
         set(value) = prefs.edit().putBoolean(KEY_LYRICS, value).apply()
 
+    /** When LRCLIB has no lyrics for a song, also ask YouTube Music (plain lyrics only). Off by default: it sends the title and artist to Google. */
+    var lyricsYoutubeMusic: Boolean
+        get() = prefs.getBoolean(KEY_LYRICS_YTM, false)
+        set(value) = prefs.edit().putBoolean(KEY_LYRICS_YTM, value).apply()
+
     /** Minutes to wait after the music stops before the TV is put back to sleep; 0 = never. Only used when AirPlay woke it. */
     var sleepAfterMinutes: Int
         get() = prefs.getInt(KEY_SLEEP, 0).let { if (it in SLEEP_CHOICES) it else 0 }
@@ -115,6 +120,7 @@ class Settings(context: Context) {
 
         const val KEY_NAME = "device_name"
         const val KEY_LYRICS = "lyrics"
+        const val KEY_LYRICS_YTM = "lyrics_youtube_music"
         const val KEY_SLEEP = "sleep_after_minutes"
         const val KEY_RETURN = "return_to_player"
         const val KEY_TV_MENU = "tv_menu_button"

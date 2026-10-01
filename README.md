@@ -25,6 +25,7 @@
 
 ### Settings (open the app on the TV)
 - **Lyrics**: Off by default. Turning it on explains what is sent.
+- **YouTube Music Lyrics** (shown when Lyrics is on): Off by default. Also looks a song up on YouTube Music when lrclib.net has nothing for it; plain text only, see the dialog it shows.
 - **Return To Player**: On (default) or Off, see the table above.
 - **Sleep After Music**: Off / 2 / 5 / 10 / 20 minutes. Needs the accessibility service, switched on once from a computer:
   ```sh

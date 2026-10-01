@@ -65,9 +65,12 @@ object LyricsRepository {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Lyrics?>?): Boolean = size > CACHE_SIZE
     }
 
-    /** Looks up lyrics. [onResult] runs on a background thread. */
-    fun load(title: String, artist: String, durationMs: Long, version: String, onResult: (Outcome) -> Unit) {
-        val key = "${norm(title)}|${norm(artist)}|${durationMs / 5000}"
+    /**
+     * Looks up lyrics. With [youtubeMusic] on, a song LRCLIB has nothing for is also looked up on YouTube Music (plain
+     * text only). [onResult] runs on a background thread.
+     */
+    fun load(title: String, artist: String, durationMs: Long, version: String, youtubeMusic: Boolean = false, onResult: (Outcome) -> Unit) {
+        val key = "${norm(title)}|${norm(artist)}|${durationMs / 5000}|${if (youtubeMusic) "y" else "n"}"
         val cached: Lyrics?
         val hit: Boolean
         synchronized(cache) {
@@ -80,7 +83,7 @@ object LyricsRepository {
                 return@execute
             }
             val outcome = try {
-                lookUp(title, artist, durationMs, version)
+                lookUp(title, artist, durationMs, version, youtubeMusic)
             } catch (e: Exception) {
                 Log.w(TAG, "lyrics lookup failed: ${e.javaClass.simpleName}")
                 Outcome.Failed
@@ -92,12 +95,23 @@ object LyricsRepository {
         }
     }
 
-    private fun lookUp(title: String, artist: String, durationMs: Long, version: String): Outcome {
+    private fun lookUp(title: String, artist: String, durationMs: Long, version: String, youtubeMusic: Boolean): Outcome {
         for ((index, query) in queriesFor(title, artist).withIndex()) {
             val candidates = search(query, version) ?: return Outcome.Failed
             val picked = pick(candidates, title, artist, durationMs)
             Log.i(TAG, "lookup ${index + 1}: ${candidates.size} candidates, ${if (picked == null) "none usable" else if (picked.synced) "picked synced lyrics" else "picked plain lyrics"}")
             if (picked != null) return Outcome.Found(picked)
+        }
+        if (youtubeMusic) {
+            // LRCLIB answered and has nothing; a failure of this second source is just "nothing found", the first one is the one to retry
+            val found = try {
+                YtmLyrics.find(title, artist, durationMs) { endpoint, body -> YtmLyrics.post(endpoint, body, version) }
+            } catch (e: Exception) {
+                Log.w(TAG, "YouTube Music lookup failed: ${e.javaClass.simpleName}")
+                null
+            }
+            Log.i(TAG, "YouTube Music: ${if (found == null) "no lyrics" else "plain lyrics found"}")
+            if (found != null) return Outcome.Found(found)
         }
         return Outcome.NotFound
     }
@@ -140,7 +154,7 @@ object LyricsRepository {
         return out
     }
 
-    private fun readLimited(stream: InputStream): String {
+    internal fun readLimited(stream: InputStream, max: Int = MAX_RESPONSE_BYTES): String {
         val out = ByteArrayOutputStream()
         val buffer = ByteArray(8192)
         var total = 0
@@ -148,7 +162,7 @@ object LyricsRepository {
             val n = stream.read(buffer)
             if (n < 0) break
             total += n
-            if (total > MAX_RESPONSE_BYTES) throw IOException("response too large")
+            if (total > max) throw IOException("response too large")
             out.write(buffer, 0, n)
         }
         return out.toString("UTF-8")
