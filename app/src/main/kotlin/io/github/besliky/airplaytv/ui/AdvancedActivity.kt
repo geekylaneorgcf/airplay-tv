@@ -22,7 +22,6 @@ class AdvancedActivity : SettingsPage() {
     private lateinit var overlayRow: Row
     private lateinit var logsRow: Row
     private lateinit var pairedRow: Row
-    private lateinit var appearanceRow: Row
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -49,7 +48,6 @@ class AdvancedActivity : SettingsPage() {
             settings.verboseLogging = !settings.verboseLogging
             bind()
         }
-        appearanceRow = addRow(getString(R.string.setting_appearance)) { cycleAppearance() }
         addRow(getString(R.string.setting_diagnostics)) { exportDiagnostics() }.navigates(true)
         pairedRow = addRow(getString(R.string.setting_paired_devices)) { showPairedDevices() }.navigates(true)
         addRow(getString(R.string.setting_reset_pairing)) { resetPairing() }
@@ -69,23 +67,6 @@ class AdvancedActivity : SettingsPage() {
         overlayRow.value(onOff(settings.performanceOverlay))
         logsRow.value(onOff(settings.verboseLogging))
         pairedRow.value(paired.count.toString())
-        appearanceRow.value(appearanceName(settings.appearance))
-    }
-
-    private fun appearanceName(appearance: Settings.Appearance): String = getString(
-        when (appearance) {
-            Settings.Appearance.APPLE_TV -> R.string.appearance_apple_tv
-            Settings.Appearance.APPLE_TV_4K -> R.string.appearance_apple_tv_4k
-            Settings.Appearance.TV -> R.string.appearance_tv
-        },
-    )
-
-    private fun cycleAppearance() {
-        settings.appearance = settings.appearance.next()
-        bind()
-        if (settings.appearance != Settings.Appearance.APPLE_TV) {
-            Dialogs.message(this, getString(R.string.dialog_appearance_title), getString(R.string.dialog_appearance_message))
-        }
     }
 
     private fun chooseDecoder() {

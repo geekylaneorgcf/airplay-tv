@@ -25,7 +25,6 @@
 ### Settings (open the app on the TV)
 - **Lyrics**: Off by default. Turning it on explains what is sent.
 - **Return To Player**: On (default) or Off, see the table above.
-- **Appears On iPhone As** (Advanced): Apple TV (default), TV, or Apple TV 4K. An iPhone draws the AirPlay icon from the model the receiver advertises, which cannot be set directly: an Apple TV model gets the Apple TV icon, anything else is drawn from what it can do. Try the others if the icon does not suit you, and switch back to Apple TV if music, photos or mirroring stop working.
 - **Sleep After Music**: Off / 2 / 5 / 10 / 20 minutes. Needs the accessibility service, switched on once from a computer:
   ```sh
   adb shell settings put secure enabled_accessibility_services io.github.besliky.airplaytv/.service.SleepService
@@ -49,6 +48,10 @@ Dialogs can be looked at the same way without changing a setting: `dialog-sleep`
 backdrop) to compare banding.
 
 ### Known limits
+- The icon an iPhone draws for this receiver is the Apple TV tile, because the receiver says it is an Apple TV. Saying anything
+  else (`FireTV` was tried) makes the iPhone connect over and over without ever starting a session: it needs a receiver that
+  speaks AirPlay 2 to be accepted as anything but an Apple TV. The core can advertise another model (`airplay_config_t.model`), the
+  app does not offer it.
 - YouTube and other apps' in-app **AirPlay video** (the cast button) is not supported (`POST /play` is refused and logged);
   Screen Mirroring is. Audio-only AirPlay from music apps is the main use.
 - Photos: implemented from the unofficial protocol notes and a loopback test; not yet verified against every iOS version. Slideshows are refused.

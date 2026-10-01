@@ -16,23 +16,6 @@ class Settings(context: Context) {
         }
     }
 
-    /**
-     * What the receiver says it is (the `model` it advertises), which an iPhone draws the AirPlay icon from:
-     * an Apple TV model gets the Apple TV icon, anything else is drawn from what it can do. The source
-     * version goes with the model; the pairs for the two Apple TVs are the ones other open receivers use.
-     */
-    enum class Appearance(val key: String, val model: String, val sourceVersion: String) {
-        APPLE_TV("apple_tv", "AppleTV3,2", "220.68"),
-        TV("tv", "FireTV", "220.68"),
-        APPLE_TV_4K("apple_tv_4k", "AppleTV6,2", "380.20.1");
-
-        fun next(): Appearance = entries[(ordinal + 1) % entries.size]
-
-        companion object {
-            fun fromKey(key: String?): Appearance = entries.firstOrNull { it.key == key } ?: APPLE_TV
-        }
-    }
-
     private val prefs: SharedPreferences =
         context.applicationContext.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
@@ -95,11 +78,6 @@ class Settings(context: Context) {
         get() = prefs.getBoolean(KEY_RETURN, true)
         set(value) = prefs.edit().putBoolean(KEY_RETURN, value).apply()
 
-    /** What the receiver says it is to an iPhone. */
-    var appearance: Appearance
-        get() = Appearance.fromKey(prefs.getString(KEY_APPEARANCE, null))
-        set(value) = prefs.edit().putString(KEY_APPEARANCE, value.key).apply()
-
     fun registerListener(l: SharedPreferences.OnSharedPreferenceChangeListener) =
         prefs.registerOnSharedPreferenceChangeListener(l)
 
@@ -113,7 +91,6 @@ class Settings(context: Context) {
         const val KEY_NAME = "device_name"
         const val KEY_LYRICS = "lyrics"
         const val KEY_SLEEP = "sleep_after_minutes"
-        const val KEY_APPEARANCE = "appearance"
         const val KEY_RETURN = "return_to_player"
 
         /** The choices offered for Sleep After Music; 0 is off. */
@@ -129,7 +106,7 @@ class Settings(context: Context) {
         const val KEY_DECODER = "preferred_decoder"
 
         /** Settings that require the receiver to be restarted when they change. */
-        val RESTART_KEYS = setOf(KEY_NAME, KEY_PIN, KEY_RESOLUTION, KEY_FPS, KEY_DECODER, KEY_APPEARANCE)
+        val RESTART_KEYS = setOf(KEY_NAME, KEY_PIN, KEY_RESOLUTION, KEY_FPS, KEY_DECODER)
 
         /**
          * Normalises a device name: trims, drops control characters and limits the

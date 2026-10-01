@@ -352,7 +352,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
         port = NativeBridge.nativeStart(
             settings.deviceName.toByteArray(Charsets.UTF_8), id.deviceId, id.publicId, seed,
             settings.requirePin, DEFAULT_PORT, mode.width, mode.height, settings.frameRate, mode.hevc,
-            settings.appearance.model, settings.appearance.sourceVersion,
+            "", "", // the receiver's own identity, an Apple TV: a different model string stops iOS from starting sessions
         )
         seed.fill(0)
         if (port <= 0) {
@@ -555,10 +555,15 @@ class ReceiverService : Service(), NativeBridge.Listener {
      * screen on afterwards. No-op when the display is already on.
      */
     @Suppress("DEPRECATION")
+    /**
+     * Turns the screen on for a sender, and ends a screensaver. A device that was asleep counts as woken
+     * by AirPlay (that is what Sleep After Music undoes). The wake lock is taken even when the device is
+     * awake, because a running screensaver counts as interactive and would otherwise stay on top of the
+     * player; on a screen that is already on it does nothing.
+     */
     private fun wakeDisplay() {
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-        if (pm.isInteractive) return
-        ReceiverState.update { it.copy(wokeDevice = true) }
+        if (!pm.isInteractive) ReceiverState.update { it.copy(wokeDevice = true) }
         try {
             pm.newWakeLock(
                 PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
@@ -586,27 +591,13 @@ class ReceiverService : Service(), NativeBridge.Listener {
     }
 
     /**
-     * Wakes the device even though it is dreaming. A dreaming device counts as interactive, so
-     * [wakeDisplay] would do nothing and the screensaver would stay on top of the player.
-     */
-    private fun wakeFromDream() {
-        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-        try {
-            pm.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP, "airplaytv:wake")
-                .acquire(3_000L)
-        } catch (e: RuntimeException) {
-            Log.w(SESSION, "cannot end the screensaver", e)
-        }
-    }
-
-    /**
      * Audio-only senders (music apps): show what is playing, like a TV with built-in AirPlay.
      * [fromScreensaver] starts the player already dimmed to its idle stage; [peek] shows it for a few
      * seconds and then goes back to what was on screen.
      */
     private fun showNowPlaying(fromScreensaver: Boolean = false, peek: Boolean = false) {
         if (ReceiverState.current.videoActive) return
-        if (fromScreensaver) wakeFromDream() else wakeDisplay()
+        wakeDisplay()
         val intent = Intent(this, NowPlayingActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             .putExtra(NowPlayingActivity.EXTRA_IDLE, fromScreensaver)

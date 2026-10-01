@@ -21,10 +21,10 @@
   display (song, progress, times; dim, drifting, on black) after 8 min, nothing lit after 30 min, display
   allowed to sleep after 15 min paused. A new song peeks for a few seconds without resetting the clock.
 - Starting the app from the Home screen while music plays opens the player; Menu opens the settings from it.
+- A session that starts while the screensaver is showing now ends the screensaver: a running screensaver counts as
+  "interactive", so the wake-up returned early and the player started underneath it.
 - Return To Player (on by default): the player takes over from the system screensaver while music plays, starting
   in its minimal stage, and a media key on the remote shows it for six seconds while it is hidden.
-- Advanced: "Appears On iPhone As" (Apple TV, TV, Apple TV 4K) chooses the model the receiver advertises,
-  which is what an iPhone draws the AirPlay icon from.
 
 ## [0.2.0] - fork
 
