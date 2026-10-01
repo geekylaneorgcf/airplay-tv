@@ -11,6 +11,7 @@ import android.os.SystemClock
 import android.text.TextUtils
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -19,13 +20,19 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import io.github.besliky.airplaytv.R
+import io.github.besliky.airplaytv.service.DacpClient
 import io.github.besliky.airplaytv.service.ReceiverState
+import io.github.besliky.airplaytv.service.RemoteControl
 import java.util.Locale
 
 /**
  * What is playing while a sender streams audio only: cover art, title, artist, album and a
  * progress bar, like a TV with built-in AirPlay. Opens on its own when audio starts and closes
  * when the session ends. Back closes the screen; the audio keeps playing.
+ *
+ * The remote controls the sender: play/pause (also OK), next/fast-forward (also right) and
+ * previous/rewind (also left). To protect OLED panels the screen dims after a while without a
+ * key press and moves a few pixels every minute.
  */
 class NowPlayingActivity : Activity() {
 
@@ -36,9 +43,14 @@ class NowPlayingActivity : Activity() {
     private lateinit var progress: ProgressBar
     private lateinit var elapsedView: TextView
     private lateinit var totalView: TextView
+    private lateinit var statusView: TextView
+    private lateinit var content: View
 
     private val handler = Handler(Looper.getMainLooper())
     private var latest = ReceiverState.Snapshot()
+    private var dimmed = false
+    private var shiftStep = 0
+    private var lastTitle = ""
 
     private val stateListener: (ReceiverState.Snapshot) -> Unit = { render(it) }
 
@@ -46,6 +58,17 @@ class NowPlayingActivity : Activity() {
         override fun run() {
             updateProgress()
             handler.postDelayed(this, PROGRESS_INTERVAL_MS)
+        }
+    }
+
+    private val dim = Runnable { setDimmed(true) }
+
+    private val shift = object : Runnable {
+        override fun run() {
+            shiftStep = (shiftStep + 1) % SHIFTS.size
+            val (x, y) = SHIFTS[shiftStep]
+            content.animate().translationX(dp(x).toFloat()).translationY(dp(y).toFloat()).setDuration(1000).start()
+            handler.postDelayed(this, SHIFT_INTERVAL_MS)
         }
     }
 
@@ -70,11 +93,15 @@ class NowPlayingActivity : Activity() {
         super.onStart()
         ReceiverState.observe(stateListener)
         handler.post(tick)
+        handler.postDelayed(shift, SHIFT_INTERVAL_MS)
+        scheduleDim()
     }
 
     override fun onStop() {
         ReceiverState.remove(stateListener)
         handler.removeCallbacks(tick)
+        handler.removeCallbacks(shift)
+        handler.removeCallbacks(dim)
         super.onStop()
     }
 
@@ -103,29 +130,35 @@ class NowPlayingActivity : Activity() {
             scaleType = ImageView.ScaleType.CENTER_CROP
             setBackgroundColor(getColor(R.color.surface))
         }
-        root.addView(art, LinearLayout.LayoutParams(dp(360), dp(360)))
+        root.addView(art, LinearLayout.LayoutParams(dp(400), dp(400)))
 
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        titleView = label(34f, R.color.text_primary, bold = true, lines = 2)
-        artistView = label(24f, R.color.text_primary, bold = false, lines = 1)
-        albumView = label(18f, R.color.text_secondary, bold = false, lines = 1)
+        titleView = label(44f, R.color.text_primary, bold = true, lines = 2)
+        artistView = label(30f, R.color.text_primary, bold = false, lines = 1)
+        albumView = label(22f, R.color.text_secondary, bold = false, lines = 1)
         column.addView(titleView, wrapWidth())
         column.addView(artistView, wrapWidth().apply { topMargin = dp(8) })
         column.addView(albumView, wrapWidth().apply { topMargin = dp(4) })
+
+        statusView = label(20f, R.color.text_secondary, bold = true, lines = 1).apply {
+            text = getString(R.string.now_playing_paused)
+            visibility = View.INVISIBLE
+        }
+        column.addView(statusView, wrapWidth().apply { topMargin = dp(24) })
 
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = PROGRESS_MAX
             progressTintList = ColorStateList.valueOf(getColor(R.color.text_primary))
             progressBackgroundTintList = ColorStateList.valueOf(getColor(R.color.surface))
         }
-        column.addView(progress, wrapWidth().apply { topMargin = dp(40) })
+        column.addView(progress, wrapWidth().apply { topMargin = dp(8) })
 
         val times = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        elapsedView = label(16f, R.color.text_secondary, bold = false, lines = 1)
-        totalView = label(16f, R.color.text_secondary, bold = false, lines = 1).apply { gravity = Gravity.END }
+        elapsedView = label(18f, R.color.text_secondary, bold = false, lines = 1)
+        totalView = label(18f, R.color.text_secondary, bold = false, lines = 1).apply { gravity = Gravity.END }
         times.addView(elapsedView, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         times.addView(totalView, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         column.addView(times, wrapWidth().apply { topMargin = dp(4) })
@@ -133,6 +166,7 @@ class NowPlayingActivity : Activity() {
         root.addView(column, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
             marginStart = dp(56)
         })
+        content = root
         return root
     }
 
@@ -154,6 +188,11 @@ class NowPlayingActivity : Activity() {
         albumView.text = s.album
         albumView.visibility = if (s.album.isBlank()) View.GONE else View.VISIBLE
         art.setImageBitmap(s.artwork)
+        statusView.visibility = if (s.playing) View.INVISIBLE else View.VISIBLE
+        if (s.title != lastTitle) {
+            lastTitle = s.title
+            setDimmed(false)
+        }
         updateProgress()
     }
 
@@ -166,12 +205,44 @@ class NowPlayingActivity : Activity() {
             return
         }
         var position = s.positionMs
-        if (s.audioActive) position += SystemClock.elapsedRealtime() - s.positionAtMs
+        if (s.audioActive && s.playing) position += SystemClock.elapsedRealtime() - s.positionAtMs
         position = position.coerceIn(0L, s.durationMs)
         progress.visibility = View.VISIBLE
         progress.progress = (position * PROGRESS_MAX / s.durationMs).toInt()
         elapsedView.text = formatTime(position)
         totalView.text = formatTime(s.durationMs)
+    }
+
+    // ---- remote control and OLED care ----
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (dimmed) {
+            setDimmed(false)
+            if (keyCode != KeyEvent.KEYCODE_BACK) return true // the first press only wakes the screen
+        }
+        scheduleDim()
+        val command = when (keyCode) {
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE,
+            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> DacpClient.PLAY_PAUSE
+            KeyEvent.KEYCODE_MEDIA_NEXT, KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
+            KeyEvent.KEYCODE_DPAD_RIGHT -> DacpClient.NEXT
+            KeyEvent.KEYCODE_MEDIA_PREVIOUS, KeyEvent.KEYCODE_MEDIA_REWIND,
+            KeyEvent.KEYCODE_DPAD_LEFT -> DacpClient.PREVIOUS
+            else -> null
+        } ?: return super.onKeyDown(keyCode, event)
+        if (event.repeatCount == 0) RemoteControl.send(command)
+        return true
+    }
+
+    private fun scheduleDim() {
+        handler.removeCallbacks(dim)
+        handler.postDelayed(dim, DIM_AFTER_MS)
+    }
+
+    private fun setDimmed(value: Boolean) {
+        dimmed = value
+        content.animate().alpha(if (value) DIM_ALPHA else 1f).setDuration(1500).start()
+        if (!value) scheduleDim()
     }
 
     private fun formatTime(ms: Long): String {
@@ -182,5 +253,11 @@ class NowPlayingActivity : Activity() {
     private companion object {
         const val PROGRESS_MAX = 1000
         const val PROGRESS_INTERVAL_MS = 500L
+        const val DIM_AFTER_MS = 2 * 60 * 1000L
+        const val DIM_ALPHA = 0.3f
+        const val SHIFT_INTERVAL_MS = 60 * 1000L
+
+        /** Offsets in dp the whole layout cycles through, so no pixel stays lit forever. */
+        val SHIFTS = listOf(0 to 0, 14 to 0, 14 to 10, 0 to 10, -14 to 10, -14 to 0, -14 to -10, 0 to -10, 14 to -10)
     }
 }

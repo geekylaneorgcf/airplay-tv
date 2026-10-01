@@ -9,6 +9,9 @@ import android.content.SharedPreferences
 import android.content.pm.ServiceInfo
 import android.graphics.BitmapFactory
 import android.hardware.display.DisplayManager
+import android.media.MediaMetadata
+import android.media.session.MediaSession
+import android.media.session.PlaybackState
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Handler
@@ -59,6 +62,8 @@ class ReceiverService : Service(), NativeBridge.Listener {
     private var wifiLock: WifiManager.WifiLock? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var audioSampleRate = 44100
+    private var dacp: DacpClient? = null
+    private var mediaSession: MediaSession? = null
     private var screenReceiverRegistered = false
 
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key -> onSettingChanged(key) }
@@ -85,6 +90,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
             onPublished = { name -> ReceiverState.update { it.copy(publishedName = name) } }
         }
         audio = AudioOutput(this)
+        dacp = DacpClient(this).also { RemoteControl.client = it }
         network = NetworkMonitor(this, ::onNetworkChanged)
         network.start()
         settings.registerListener(prefsListener)
@@ -121,6 +127,10 @@ class ReceiverService : Service(), NativeBridge.Listener {
             screenReceiverRegistered = false
         }
         if (NativeBridge.listener === this) NativeBridge.listener = null
+        releaseMediaSession()
+        RemoteControl.client = null
+        dacp?.shutdown()
+        dacp = null
         handler.removeCallbacksAndMessages(null)
         ReceiverState.update { it.copy(status = Status.OFF) }
         super.onDestroy()
@@ -429,8 +439,10 @@ class ReceiverService : Service(), NativeBridge.Listener {
         ReceiverState.update {
             it.copy(clientName = null, clientModel = null, videoActive = false, audioActive = false,
                 videoWidth = 0, videoHeight = 0, pin = null, title = "", artist = "", album = "",
-                artwork = null, durationMs = -1, positionMs = -1)
+                artwork = null, durationMs = -1, positionMs = -1, playing = true)
         }
+        dacp?.clear()
+        releaseMediaSession()
         if (restartPending) restartReceiver() else updateIdleState()
     }
 
@@ -462,6 +474,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
         audio.start(sampleRate, channels, lowLatency)
         if (sampleRate > 0) audioSampleRate = sampleRate
         ReceiverState.update { it.copy(audioActive = true) }
+        startMediaSession()
         showNowPlaying()
     }
 
@@ -479,11 +492,13 @@ class ReceiverService : Service(), NativeBridge.Listener {
         // progress in a fixed order, so clearing would wipe a cover that just arrived. A new
         // track's artwork and progress replace the old ones when they come in.
         ReceiverState.update { it.copy(title = title, artist = artist, album = album) }
+        refreshMediaSession()
     }
 
     override fun onArtwork(data: ByteArray) {
         val bitmap = decodeArtwork(data) ?: return
         ReceiverState.update { it.copy(artwork = bitmap) }
+        refreshMediaSession()
     }
 
     override fun onProgress(start: Long, current: Long, end: Long) {
@@ -496,6 +511,72 @@ class ReceiverService : Service(), NativeBridge.Listener {
             it.copy(durationMs = durationMs, positionMs = positionMs.coerceAtMost(durationMs),
                 positionAtMs = SystemClock.elapsedRealtime())
         }
+        refreshMediaSession()
+    }
+
+    override fun onPlaying(playing: Boolean) {
+        ReceiverState.update {
+            val now = SystemClock.elapsedRealtime()
+            var position = it.positionMs
+            // Freeze the position at the moment of the pause; resume counting from now.
+            if (position >= 0 && it.playing) {
+                position = (position + now - it.positionAtMs).coerceAtMost(it.durationMs.coerceAtLeast(0))
+            }
+            it.copy(playing = playing, positionMs = position, positionAtMs = now)
+        }
+        refreshMediaSession()
+    }
+
+    override fun onRemote(dacpId: String, activeRemote: String) {
+        dacp?.configure(dacpId, activeRemote)
+    }
+
+    // ---- media session: routes the remote's media keys to the sender, even when this app is not focused ----
+
+    private fun startMediaSession() {
+        if (mediaSession != null) return
+        val session = MediaSession(this, "AirPlayTV")
+        session.setCallback(object : MediaSession.Callback() {
+            override fun onPlay() = RemoteControl.send(DacpClient.PLAY_PAUSE)
+            override fun onPause() = RemoteControl.send(DacpClient.PLAY_PAUSE)
+            override fun onSkipToNext() = RemoteControl.send(DacpClient.NEXT)
+            override fun onSkipToPrevious() = RemoteControl.send(DacpClient.PREVIOUS)
+            override fun onFastForward() = RemoteControl.send(DacpClient.NEXT)
+            override fun onRewind() = RemoteControl.send(DacpClient.PREVIOUS)
+        })
+        session.isActive = true
+        mediaSession = session
+        refreshMediaSession()
+    }
+
+    private fun refreshMediaSession() {
+        val session = mediaSession ?: return
+        val s = ReceiverState.current
+        val metadata = MediaMetadata.Builder()
+            .putString(MediaMetadata.METADATA_KEY_TITLE, s.title)
+            .putString(MediaMetadata.METADATA_KEY_ARTIST, s.artist)
+            .putString(MediaMetadata.METADATA_KEY_ALBUM, s.album)
+        if (s.durationMs > 0) metadata.putLong(MediaMetadata.METADATA_KEY_DURATION, s.durationMs)
+        s.artwork?.let { metadata.putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, it) }
+        session.setMetadata(metadata.build())
+        val actions = PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_PLAY_PAUSE or
+            PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_PREVIOUS or
+            PlaybackState.ACTION_FAST_FORWARD or PlaybackState.ACTION_REWIND
+        val state = if (s.playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED
+        val position = if (s.positionMs >= 0) s.positionMs else PlaybackState.PLAYBACK_POSITION_UNKNOWN
+        session.setPlaybackState(
+            PlaybackState.Builder()
+                .setActions(actions)
+                .setState(state, position, if (s.playing) 1f else 0f, SystemClock.elapsedRealtime())
+                .build(),
+        )
+    }
+
+    private fun releaseMediaSession() {
+        val session = mediaSession ?: return
+        mediaSession = null
+        session.isActive = false
+        session.release()
     }
 
     /** Decodes cover art, shrinking it so a large JPEG cannot exhaust memory on a 1.7 GB stick. */

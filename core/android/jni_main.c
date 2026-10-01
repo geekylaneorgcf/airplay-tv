@@ -53,6 +53,8 @@ static struct {
     jmethodID track_info;
     jmethodID artwork;
     jmethodID progress;
+    jmethodID playing;
+    jmethodID remote;
 } g_cb;
 
 static pthread_mutex_t g_server_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -158,6 +160,14 @@ void platform_on_volume(float gain) {
     }
 }
 
+void platform_on_playing(bool playing) {
+    JNIEnv *env = get_env();
+    if (env) {
+        (*env)->CallStaticVoidMethod(env, g_bridge, g_cb.playing, (jboolean) playing);
+        check_exception(env);
+    }
+}
+
 static void ev_session_started(void *ctx, const char *name, const char *model) {
     (void) ctx;
     JNIEnv *env = get_env();
@@ -242,6 +252,24 @@ static void ev_artwork(void *ctx, const uint8_t *data, size_t len) {
     (*env)->CallStaticVoidMethod(env, g_bridge, g_cb.artwork, arr);
     check_exception(env);
     (*env)->DeleteLocalRef(env, arr);
+}
+
+static void ev_remote(void *ctx, const char *dacp_id, const char *active_remote) {
+    (void) ctx;
+    JNIEnv *env = get_env();
+    if (!env) {
+        return;
+    }
+    jbyteArray d = utf8_bytes(env, dacp_id);
+    jbyteArray a = utf8_bytes(env, active_remote);
+    (*env)->CallStaticVoidMethod(env, g_bridge, g_cb.remote, d, a);
+    check_exception(env);
+    if (d) {
+        (*env)->DeleteLocalRef(env, d);
+    }
+    if (a) {
+        (*env)->DeleteLocalRef(env, a);
+    }
 }
 
 static void ev_progress(void *ctx, uint32_t start, uint32_t current, uint32_t end) {
@@ -391,6 +419,7 @@ static jint JNICALL n_start(JNIEnv *env, jclass cls, jbyteArray name, jbyteArray
         .track_info = ev_track_info,
         .artwork = ev_artwork,
         .progress = ev_progress,
+        .remote = ev_remote,
     };
 
     pthread_mutex_lock(&g_server_lock);
@@ -646,6 +675,8 @@ JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *reserved) {
     g_cb.track_info = (*env)->GetStaticMethodID(env, g_bridge, "onTrackInfo", "([B[B[B)V");
     g_cb.artwork = (*env)->GetStaticMethodID(env, g_bridge, "onArtwork", "([B)V");
     g_cb.progress = (*env)->GetStaticMethodID(env, g_bridge, "onProgress", "(JJJ)V");
+    g_cb.playing = (*env)->GetStaticMethodID(env, g_bridge, "onPlaying", "(Z)V");
+    g_cb.remote = (*env)->GetStaticMethodID(env, g_bridge, "onRemote", "([B[B)V");
     if ((*env)->ExceptionCheck(env)) {
         (*env)->ExceptionClear(env);
         return JNI_ERR;

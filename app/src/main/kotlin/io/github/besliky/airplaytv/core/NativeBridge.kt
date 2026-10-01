@@ -30,6 +30,12 @@ object NativeBridge {
 
         /** Position in RTP timestamp units (unsigned 32 bit, widened to Long). */
         fun onProgress(start: Long, current: Long, end: Long)
+
+        /** The sender paused (false) or is playing (true) again. */
+        fun onPlaying(playing: Boolean)
+
+        /** The sender's remote-control (DACP) identity. */
+        fun onRemote(dacpId: String, activeRemote: String)
     }
 
     /** Decoder low-latency options, see video_decoder.h. */
@@ -121,6 +127,16 @@ object NativeBridge {
 
     @JvmStatic
     fun onProgress(start: Long, current: Long, end: Long) = post { it.onProgress(start, current, end) }
+
+    @JvmStatic
+    fun onPlaying(playing: Boolean) = post { it.onPlaying(playing) }
+
+    @JvmStatic
+    fun onRemote(dacpId: ByteArray?, activeRemote: ByteArray?) {
+        val d = dacpId.utf8()
+        val a = activeRemote.utf8()
+        post { it.onRemote(d, a) }
+    }
 
     // ---- native methods ----
 

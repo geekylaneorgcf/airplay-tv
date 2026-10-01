@@ -56,6 +56,7 @@ static struct {
     size_t max_frames;
     bool prebuffering;
     int64_t pts_us;
+    bool paused;           /* flushed and no audio since: the sender paused or seeked */
 } g_ap = { .lock = PTHREAD_MUTEX_INITIALIZER, .cond = PTHREAD_COND_INITIALIZER };
 
 static const uint8_t kAscAacEld[] = { 0xf8, 0xe8, 0x50, 0x00 };  /* ELD, 44.1 kHz, stereo, 480 */
@@ -169,6 +170,7 @@ bool ap_start(const audio_format_t *format) {
         pthread_mutex_unlock(&g_ap.lock);
         return false;
     }
+    g_ap.paused = false;
     g_ap.active = true;
     pthread_mutex_unlock(&g_ap.lock);
     LOG_I(AUDIO, "audio output started (%s)", format->ct == AUDIO_CT_ALAC ? "ALAC"
@@ -229,7 +231,12 @@ void ap_frame(const uint8_t *data, size_t len, uint32_t rtp_ts, uint64_t remote_
         drain_aac_locked();
     }
     (void) rtp_ts;
+    bool resumed = g_ap.paused;
+    g_ap.paused = false;
     pthread_mutex_unlock(&g_ap.lock);
+    if (resumed) {
+        platform_on_playing(true);
+    }
 }
 
 void ap_flush(void) {
@@ -238,7 +245,12 @@ void ap_flush(void) {
     if (g_ap.aac) {
         AMediaCodec_flush(g_ap.aac);
     }
+    bool was_playing = g_ap.active && !g_ap.paused;
+    g_ap.paused = true;
     pthread_mutex_unlock(&g_ap.lock);
+    if (was_playing) {
+        platform_on_playing(false);
+    }
 }
 
 void ap_volume(float db) {

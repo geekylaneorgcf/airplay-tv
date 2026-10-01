@@ -96,6 +96,8 @@ struct airplay_server {
     uint64_t features;
     char pk_hex[65];
     char device_id_str[18];
+    char dacp_id[48];         /* last remote-control identity reported to the events */
+    char active_remote[48];
 
     int listen_fd[2];
     uint16_t port;
@@ -323,6 +325,8 @@ static void session_destroy(airplay_server_t *s, session_t *session) {
     if (s->active == session) {
         s->active = NULL;
         atomic_store(&s->session_active, false);
+        s->dacp_id[0] = '\0';
+        s->active_remote[0] = '\0';
         LOG_I(SESSION, "session %u ended", session->id);
         if (s->ev.session_ended) {
             s->ev.session_ended(s->ev.ctx);
@@ -1160,6 +1164,16 @@ static void handle_request(airplay_server_t *s, conn_t *c, const rtsp_request_t 
     const char *m = req->method;
     const char *url = req->url;
     bool rtsp = strcmp(req->protocol, "RTSP/1.0") == 0;
+
+    const char *dacp_id = rtsp_header(req, "DACP-ID");
+    const char *active_remote = rtsp_header(req, "Active-Remote");
+    if (dacp_id && active_remote && s->ev.remote &&
+        (strcmp(dacp_id, s->dacp_id) != 0 || strcmp(active_remote, s->active_remote) != 0) &&
+        strlen(dacp_id) < sizeof(s->dacp_id) && strlen(active_remote) < sizeof(s->active_remote)) {
+        snprintf(s->dacp_id, sizeof(s->dacp_id), "%s", dacp_id);
+        snprintf(s->active_remote, sizeof(s->active_remote), "%s", active_remote);
+        s->ev.remote(s->ev.ctx, s->dacp_id, s->active_remote);
+    }
 
     if (!rtsp) {
         /* AirPlay video (HLS/URL playback) is not offered by this receiver. */

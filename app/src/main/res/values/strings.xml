@@ -71,4 +71,5 @@
     <string name="dialog_decoder_title">Preferred Decoder</string>
     <string name="now_playing_from">Playing from %1$s</string>
     <string name="now_playing_device">AirPlay</string>
+    <string name="now_playing_paused">Paused</string>
 </resources>

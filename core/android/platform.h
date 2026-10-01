@@ -21,5 +21,6 @@ void platform_on_video_size(int width, int height);
 void platform_on_audio_started(int sample_rate, int channels, bool low_latency);
 void platform_on_audio_stopped(void);
 void platform_on_volume(float gain);
+void platform_on_playing(bool playing);
 
 #endif

@@ -48,6 +48,9 @@ typedef struct {
     void (*artwork)(void *ctx, const uint8_t *data, size_t len);
     /* Playback position in RTP timestamp units: start, current, end. Optional. */
     void (*progress)(void *ctx, uint32_t start, uint32_t current, uint32_t end);
+    /* The sender's remote-control (DACP) identity, from the DACP-ID and Active-Remote headers.
+     * Called when it first appears or changes. Optional. */
+    void (*remote)(void *ctx, const char *dacp_id, const char *active_remote);
 } airplay_events_t;
 
 typedef struct {

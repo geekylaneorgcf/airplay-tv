@@ -33,6 +33,8 @@ object ReceiverState {
         val durationMs: Long = -1,
         val positionMs: Long = -1,
         val positionAtMs: Long = 0,
+        /** False between a pause and the next audio from the sender. */
+        val playing: Boolean = true,
     )
 
     private val handler = Handler(Looper.getMainLooper())
