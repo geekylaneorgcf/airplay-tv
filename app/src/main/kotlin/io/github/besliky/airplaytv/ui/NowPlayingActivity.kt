@@ -320,6 +320,7 @@ class NowPlayingActivity : Activity() {
         val volumeRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            clipChildren = false // the loud speaker swells on every change and sits at the row's right edge
             addView(speakerLow, LinearLayout.LayoutParams(dp(22), dp(22)))
             addView(volumeBar, LinearLayout.LayoutParams(0, dp(16), 1f).apply {
                 marginStart = dp(14)
@@ -340,6 +341,7 @@ class NowPlayingActivity : Activity() {
         }
         val controlsGroup = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            clipChildren = false
             addView(progressRow, wide())
             addView(transport, wide(top = 14))
             addView(volumeRow, wide(top = 12))
@@ -347,6 +349,7 @@ class NowPlayingActivity : Activity() {
         }
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            clipChildren = false
             addView(textGroup, wide())
             addView(View(this@NowPlayingActivity), LinearLayout.LayoutParams(0, 0, 1f))
             addView(controlsGroup, wide())
