@@ -48,6 +48,10 @@
     <string name="setting_logs">Detailed Logs</string>
     <string name="setting_diagnostics">Export Diagnostics</string>
     <string name="setting_reset_pairing">Reset Pairing</string>
+    <string name="setting_appearance">Appears On iPhone As</string>
+    <string name="appearance_apple_tv">Apple TV</string>
+    <string name="appearance_apple_tv_4k">Apple TV 4K</string>
+    <string name="appearance_tv">TV</string>
     <string name="setting_paired_devices">Paired Devices</string>
     <string name="setting_licenses">Open Source Licenses</string>
     <string name="setting_version">Version</string>
@@ -69,6 +73,8 @@
     <string name="dialog_diagnostics_title">Diagnostics</string>
     <string name="dialog_diagnostics_saved">Saved to %1$s</string>
     <string name="dialog_decoder_title">Preferred Decoder</string>
+    <string name="dialog_appearance_title">Appears On iPhone As</string>
+    <string name="dialog_appearance_message">An iPhone draws the AirPlay icon from what the receiver says it is. If anything stops working (music, photos or screen mirroring), switch back to Apple TV. It can take a few seconds, and sometimes turning Wi-Fi off and on again on the iPhone, before the new icon shows.</string>
     <string name="now_playing_from">Playing from %1$s</string>
     <string name="now_playing_device">AirPlay</string>
     <string name="setting_lyrics">Lyrics</string>

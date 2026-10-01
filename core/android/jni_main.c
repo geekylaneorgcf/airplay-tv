@@ -410,7 +410,7 @@ static bool copy_bytes(JNIEnv *env, jbyteArray arr, uint8_t *out, size_t len) {
 
 static jint JNICALL n_start(JNIEnv *env, jclass cls, jbyteArray name, jbyteArray device_id, jstring public_id,
                             jbyteArray seed, jboolean require_pin, jint port, jint width, jint height, jint fps,
-                            jboolean hevc) {
+                            jboolean hevc, jstring model, jstring srcvers) {
     (void) cls;
     airplay_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
@@ -432,6 +432,20 @@ static jint JNICALL n_start(JNIEnv *env, jclass cls, jbyteArray name, jbyteArray
         if (pi) {
             str_copy(cfg.public_id, sizeof(cfg.public_id), pi);
             (*env)->ReleaseStringUTFChars(env, public_id, pi);
+        }
+    }
+    if (model) {
+        const char *m = (*env)->GetStringUTFChars(env, model, NULL);
+        if (m) {
+            str_copy(cfg.model, sizeof(cfg.model), m);
+            (*env)->ReleaseStringUTFChars(env, model, m);
+        }
+    }
+    if (srcvers) {
+        const char *v = (*env)->GetStringUTFChars(env, srcvers, NULL);
+        if (v) {
+            str_copy(cfg.srcvers, sizeof(cfg.srcvers), v);
+            (*env)->ReleaseStringUTFChars(env, srcvers, v);
         }
     }
     cfg.require_pin = require_pin;
@@ -662,7 +676,7 @@ static jboolean JNICALL n_session_active(JNIEnv *env, jclass cls) {
 static const JNINativeMethod kMethods[] = {
     { "nativeSetLogLevel", "(I)V", (void *) n_set_log_level },
     { "nativeLog", "(IILjava/lang/String;)V", (void *) n_log },
-    { "nativeStart", "([B[BLjava/lang/String;[BZIIIIZ)I", (void *) n_start },
+    { "nativeStart", "([B[BLjava/lang/String;[BZIIIIZLjava/lang/String;Ljava/lang/String;)I", (void *) n_start },
     { "nativeStop", "()V", (void *) n_stop },
     { "nativePublicKey", "()Ljava/lang/String;", (void *) n_public_key },
     { "nativeTxtRecords", "(Z)[Ljava/lang/String;", (void *) n_txt_records },

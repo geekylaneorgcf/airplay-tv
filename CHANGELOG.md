@@ -13,6 +13,16 @@
   Another cut of a song gives its words as plain lyrics (time-stamped lines still need a length within
   10 s of the track's).
 - Preview modes for the lyrics states, the dialogs and the banding comparison.
+- The loud speaker icon was cut off at its right edge (its outer wave was drawn past the icon's frame), and
+  it was clipped again whenever it swelled on a volume change. Both fixed.
+- OLED care did not get past its first stage in real use: the sender repeats its volume every time a stream
+  starts, and that reset the idle clock. Repeats are ignored (and no longer undo a volume set with the TV
+  remote); only a volume that moved counts as someone at the controls. New ladder: dim after 2 min, a minimal
+  display (song, progress, times; dim, drifting, on black) after 5 min, nothing lit after 30 min, display
+  allowed to sleep after 15 min paused. A new song peeks for a few seconds without resetting the clock.
+- Starting the app from the Home screen while music plays opens the player; Menu opens the settings from it.
+- Advanced: "Appears On iPhone As" (Apple TV, Apple TV 4K, TV) chooses the model the receiver advertises,
+  which is what an iPhone draws the AirPlay icon from.
 
 ## [0.2.0] - fork
 

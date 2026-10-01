@@ -186,11 +186,11 @@ int airplay_txt_airplay(const airplay_server_t *s, txt_entry_t *out, int max) {
     n = txt_add(out, max, n, "deviceid", s->device_id_str);
     n = txt_add(out, max, n, "features", features);
     n = txt_add(out, max, n, "flags", "0x4");
-    n = txt_add(out, max, n, "model", AIRPLAY_MODEL);
+    n = txt_add(out, max, n, "model", s->cfg.model);
     n = txt_add(out, max, n, "pk", s->pk_hex);
     n = txt_add(out, max, n, "pi", s->cfg.public_id);
     n = txt_add(out, max, n, "pw", s->cfg.require_pin ? "true" : "false");
-    n = txt_add(out, max, n, "srcvers", AIRPLAY_SOURCE_VERSION);
+    n = txt_add(out, max, n, "srcvers", s->cfg.srcvers);
     n = txt_add(out, max, n, "vv", "2");
     return n;
 }
@@ -205,7 +205,7 @@ int airplay_txt_raop(const airplay_server_t *s, txt_entry_t *out, int max) {
     n = txt_add(out, max, n, "et", "0,3,5");
     n = txt_add(out, max, n, "vv", "2");
     n = txt_add(out, max, n, "ft", features);
-    n = txt_add(out, max, n, "am", AIRPLAY_MODEL);
+    n = txt_add(out, max, n, "am", s->cfg.model);
     n = txt_add(out, max, n, "md", "0,1,2");
     n = txt_add(out, max, n, "rhd", "5.6.0.0");
     n = txt_add(out, max, n, "pw", s->cfg.require_pin ? "true" : "false");
@@ -215,7 +215,7 @@ int airplay_txt_raop(const airplay_server_t *s, txt_entry_t *out, int max) {
     n = txt_add(out, max, n, "tp", "UDP");
     n = txt_add(out, max, n, "txtvers", "1");
     n = txt_add(out, max, n, "sf", s->cfg.require_pin ? "0x8c" : "0x4");
-    n = txt_add(out, max, n, "vs", AIRPLAY_SOURCE_VERSION);
+    n = txt_add(out, max, n, "vs", s->cfg.srcvers);
     n = txt_add(out, max, n, "vn", "65537");
     n = txt_add(out, max, n, "pk", s->pk_hex);
     return n;
@@ -471,7 +471,7 @@ static void handle_server_info(airplay_server_t *s, rtsp_reply_t *reply) {
                      "<key>protovers</key><string>1.0</string>\n"
                      "<key>srcvers</key><string>%s</string>\n"
                      "</dict></plist>\n",
-                     s->device_id_str, (unsigned long long) s->features, AIRPLAY_MODEL, AIRPLAY_SOURCE_VERSION);
+                     s->device_id_str, (unsigned long long) s->features, s->cfg.model, s->cfg.srcvers);
     if (n <= 0 || (size_t) n >= sizeof(xml) || !rtsp_reply_body_copy(reply, "text/x-apple-plist+xml", xml, (size_t) n)) {
         http_empty(reply, 500, "Internal Server Error");
         return;
@@ -716,9 +716,9 @@ static void handle_info(airplay_server_t *s, conn_t *c, const rtsp_request_t *re
     dict_set_uint(root, "vv", 2);
     dict_set_uint(root, "statusFlags", 68);
     dict_set_uint(root, "keepAliveLowPower", 1);
-    bp_dict_set(root, "sourceVersion", bp_new_string(AIRPLAY_SOURCE_VERSION));
+    bp_dict_set(root, "sourceVersion", bp_new_string(s->cfg.srcvers));
     bp_dict_set(root, "keepAliveSendStatsAsBody", bp_new_bool(true));
-    bp_dict_set(root, "model", bp_new_string(AIRPLAY_MODEL));
+    bp_dict_set(root, "model", bp_new_string(s->cfg.model));
     bp_dict_set(root, "initialVolume", bp_new_real(s->volume_db));
 
     bp_node_t *latencies = bp_new_array();
@@ -1463,7 +1463,9 @@ static bool process_rx(airplay_server_t *s, conn_t *c) {
             if (strcmp(req->method, "RECORD") != 0) {
                 rtsp_reply_header(&reply, "Audio-Jack-Status", "connected; type=digital");
             }
-            rtsp_reply_header(&reply, "Server", "AirTunes/" AIRPLAY_SOURCE_VERSION);
+            char server_header[40];
+            snprintf(server_header, sizeof(server_header), "AirTunes/%s", s->cfg.srcvers);
+            rtsp_reply_header(&reply, "Server", server_header);
             if (cseq_value >= 0) {
                 char num[16];
                 snprintf(num, sizeof(num), "%lld", cseq_value);
@@ -1666,6 +1668,24 @@ static void *server_thread(void *arg) {
 /* ------------------------------------------------------------------------- */
 /* public API                                                                 */
 
+/* Keeps only characters that are safe in a TXT record and a header (letters, digits and ",._-"), and falls
+ * back to [fallback] when nothing is left, so a bad value can never make the advertisement unusable. */
+static void clean_identity(char *value, size_t cap, const char *fallback) {
+    size_t n = 0;
+    for (size_t i = 0; i < cap && value[i]; i++) {
+        char c = value[i];
+        bool ok = (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == ',' || c == '.' ||
+                  c == '_' || c == '-';
+        if (ok && n + 1 < cap) {
+            value[n++] = c;
+        }
+    }
+    value[n] = '\0';
+    if (n == 0) {
+        str_copy(value, cap, fallback);
+    }
+}
+
 airplay_server_t *airplay_server_create(const airplay_config_t *config, const airplay_events_t *events,
                                         const media_sink_ops_t *media, void *media_ctx) {
     if (!config || !media) {
@@ -1696,6 +1716,8 @@ airplay_server_t *airplay_server_create(const airplay_config_t *config, const ai
     if (!s->cfg.name[0]) {
         str_copy(s->cfg.name, sizeof(s->cfg.name), "AirPlay TV");
     }
+    clean_identity(s->cfg.model, sizeof(s->cfg.model), AIRPLAY_MODEL);
+    clean_identity(s->cfg.srcvers, sizeof(s->cfg.srcvers), AIRPLAY_SOURCE_VERSION);
     pairing_identity_init(&s->identity, config->identity_seed);
     secure_zero(s->cfg.identity_seed, sizeof(s->cfg.identity_seed));
     hex_encode(s->identity.public_key, ED25519_KEY_SIZE, s->pk_hex);

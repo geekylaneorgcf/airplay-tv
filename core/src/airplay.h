@@ -31,6 +31,9 @@ typedef struct {
     int display_height;
     int display_fps;
     bool hevc;                  /* advertise H.265 mirroring */
+    char model[24];             /* "model" / "am" in the advertisement, e.g. "AppleTV3,2"; empty = AIRPLAY_MODEL.
+                                 * An iPhone draws the AirPlay icon from it. */
+    char srcvers[16];           /* advertised source version; empty = AIRPLAY_SOURCE_VERSION */
 } airplay_config_t;
 
 typedef struct {

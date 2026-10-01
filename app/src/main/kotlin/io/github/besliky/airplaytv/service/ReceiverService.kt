@@ -339,6 +339,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
         port = NativeBridge.nativeStart(
             settings.deviceName.toByteArray(Charsets.UTF_8), id.deviceId, id.publicId, seed,
             settings.requirePin, DEFAULT_PORT, mode.width, mode.height, settings.frameRate, mode.hevc,
+            settings.appearance.model, settings.appearance.sourceVersion,
         )
         seed.fill(0)
         if (port <= 0) {

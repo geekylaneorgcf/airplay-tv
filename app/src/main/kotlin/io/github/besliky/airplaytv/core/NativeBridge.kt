@@ -175,6 +175,8 @@ object NativeBridge {
         height: Int,
         fps: Int,
         hevc: Boolean,
+        model: String,
+        sourceVersion: String,
     ): Int
 
     @JvmStatic

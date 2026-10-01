@@ -805,6 +805,77 @@ TEST(loopback_survives_hostile_clients) {
     airplay_server_destroy(s);
 }
 
+/* The identity (model and source version) is configurable because an iPhone draws the AirPlay icon from it. */
+static bool txt_value(const txt_entry_t *e, int n, const char *key, const char *want) {
+    for (int i = 0; i < n; i++) {
+        if (!strcmp(e[i].key, key)) {
+            return !strcmp(e[i].value, want);
+        }
+    }
+    return false;
+}
+
+static airplay_server_t *start_server_with_identity(const char *model, const char *srcvers, int *port) {
+    cap_reset();
+    airplay_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    str_copy(cfg.name, sizeof(cfg.name), "Test TV");
+    memcpy(cfg.device_id, "\x02\x11\x22\x33\x44\x55", 6);
+    str_copy(cfg.public_id, sizeof(cfg.public_id), "5d1a3c3e-0f2b-4c64-8a51-2d7c9f2b6a10");
+    memset(cfg.identity_seed, 0x42, 32);
+    str_copy(cfg.model, sizeof(cfg.model), model);
+    str_copy(cfg.srcvers, sizeof(cfg.srcvers), srcvers);
+    cfg.display_width = 1920;
+    cfg.display_height = 1080;
+    cfg.display_fps = 60;
+    airplay_events_t ev = {
+        .session_started = ev_started, .session_ended = ev_ended, .pin_display = ev_pin, .client_paired = ev_paired,
+    };
+    airplay_server_t *s = airplay_server_create(&cfg, &ev, &kOps, NULL);
+    if (!s) return NULL;
+    *port = airplay_server_start(s);
+    if (*port <= 0) {
+        airplay_server_destroy(s);
+        return NULL;
+    }
+    return s;
+}
+
+TEST(txt_records_carry_the_configured_identity) {
+    int port = 0;
+    airplay_server_t *s = start_server_with_identity("AppleTV6,2", "380.20.1", &port);
+    CHECK(s != NULL);
+    txt_entry_t e[24];
+    int n = airplay_txt_airplay(s, e, 24);
+    CHECK(txt_value(e, n, "model", "AppleTV6,2"));
+    CHECK(txt_value(e, n, "srcvers", "380.20.1"));
+    n = airplay_txt_raop(s, e, 24);
+    CHECK(txt_value(e, n, "am", "AppleTV6,2"));
+    CHECK(txt_value(e, n, "vs", "380.20.1"));
+    airplay_server_destroy(s);
+
+    /* a model that is not an Apple one is passed through as it is */
+    s = start_server_with_identity("FireTV", "220.68", &port);
+    CHECK(s != NULL);
+    n = airplay_txt_airplay(s, e, 24);
+    CHECK(txt_value(e, n, "model", "FireTV"));
+    n = airplay_txt_raop(s, e, 24);
+    CHECK(txt_value(e, n, "am", "FireTV"));
+    airplay_server_destroy(s);
+}
+
+TEST(a_bad_identity_cannot_break_the_advertisement) {
+    int port = 0;
+    /* characters that do not belong in a TXT record or a header are dropped, an empty result falls back */
+    airplay_server_t *s = start_server_with_identity("Fire TV\r\n=x", "!!", &port);
+    CHECK(s != NULL);
+    txt_entry_t e[24];
+    int n = airplay_txt_airplay(s, e, 24);
+    CHECK(txt_value(e, n, "model", "FireTVx"));
+    CHECK(txt_value(e, n, "srcvers", "220.68"));
+    airplay_server_destroy(s);
+}
+
 TEST(txt_records_match_protocol) {
     int port = 0;
     airplay_server_t *s = start_server(true, &port);
@@ -825,6 +896,8 @@ TEST(txt_records_match_protocol) {
         }
         if (!strcmp(e[i].key, "deviceid")) CHECK_STR(e[i].value, "02:11:22:33:44:55");
         if (!strcmp(e[i].key, "pw")) CHECK_STR(e[i].value, "true");
+        if (!strcmp(e[i].key, "model")) CHECK_STR(e[i].value, "AppleTV3,2"); /* the default identity */
+        if (!strcmp(e[i].key, "srcvers")) CHECK_STR(e[i].value, "220.68");
     }
     CHECK(have_features && have_pk);
     n = airplay_txt_raop(s, e, 24);
