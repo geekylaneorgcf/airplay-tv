@@ -1,9 +1,10 @@
 package io.github.besliky.airplaytv.ui
 
 import android.app.Activity
+import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
+import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -56,10 +57,10 @@ class NowPlayingActivity : Activity() {
     private var shiftStep = 0
     private var lastTitle = ""
     private var lastVolumeAt = 0L
-    private lateinit var volumePanel: View
-    private lateinit var volumeIcon: ImageView
-    private lateinit var volumeBar: ProgressBar
-    private lateinit var volumeText: TextView
+    private lateinit var volumeHud: VolumeHud
+    private lateinit var audioManager: AudioManager
+    private var lastStreamVolume = -1
+    private var lastStreamMuted = false
 
     private val stateListener: (ReceiverState.Snapshot) -> Unit = { render(it) }
 
@@ -71,7 +72,17 @@ class NowPlayingActivity : Activity() {
     }
 
     private val dim = Runnable { setDimmed(true) }
-    private val hideVolume = Runnable { volumePanel.animate().alpha(0f).setDuration(300).start() }
+    private val hideVolume = Runnable {
+        volumeHud.animate().alpha(0f).translationX(-dp(12).toFloat()).setDuration(250).start()
+    }
+
+    /** The Fire remote's volume and mute buttons change the stick's own volume; reflect that too. */
+    private val volumePoll = object : Runnable {
+        override fun run() {
+            pollSystemVolume()
+            handler.postDelayed(this, VOLUME_POLL_MS)
+        }
+    }
 
     private val shift = object : Runnable {
         override fun run() {
@@ -96,6 +107,9 @@ class NowPlayingActivity : Activity() {
                     WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED,
             )
         }
+        audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        lastStreamVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+        lastStreamMuted = audioManager.isStreamMute(AudioManager.STREAM_MUSIC)
         lastVolumeAt = ReceiverState.current.volumeAtMs
         setContentView(buildContent())
     }
@@ -104,6 +118,7 @@ class NowPlayingActivity : Activity() {
         super.onStart()
         ReceiverState.observe(stateListener)
         handler.post(tick)
+        handler.post(volumePoll)
         handler.postDelayed(shift, SHIFT_INTERVAL_MS)
         scheduleDim()
     }
@@ -111,6 +126,7 @@ class NowPlayingActivity : Activity() {
     override fun onStop() {
         ReceiverState.remove(stateListener)
         handler.removeCallbacks(tick)
+        handler.removeCallbacks(volumePoll)
         handler.removeCallbacks(shift)
         handler.removeCallbacks(dim)
         handler.removeCallbacks(hideVolume)
@@ -189,40 +205,12 @@ class NowPlayingActivity : Activity() {
 
         content = root
 
-        volumeIcon = ImageView(this).apply { setImageResource(R.drawable.ic_volume) }
-        volumeBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-            max = PROGRESS_MAX
-            progressTintList = ColorStateList.valueOf(getColor(R.color.text_primary))
-            progressBackgroundTintList = ColorStateList.valueOf(getColor(R.color.text_secondary))
-        }
-        volumeText = label(20f, R.color.text_primary, bold = true, lines = 1).apply {
-            minWidth = dp(64)
-            gravity = Gravity.END
-        }
-        val panel = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(20), dp(14), dp(24), dp(14))
-            background = GradientDrawable().apply {
-                setColor(getColor(R.color.surface))
-                cornerRadius = dp(16).toFloat()
-            }
-            alpha = 0f
-        }
-        panel.addView(volumeIcon, LinearLayout.LayoutParams(dp(36), dp(36)))
-        panel.addView(volumeBar, LinearLayout.LayoutParams(dp(260), dp(8)).apply {
-            marginStart = dp(16)
-            marginEnd = dp(16)
-        })
-        panel.addView(volumeText, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        volumePanel = panel
+        volumeHud = VolumeHud(this).apply { alpha = 0f }
 
         val frame = FrameLayout(this)
         frame.addView(root, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        frame.addView(panel, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-            Gravity.TOP or Gravity.END).apply {
-            topMargin = dp(40)
-            marginEnd = dp(48)
+        frame.addView(volumeHud, FrameLayout.LayoutParams(dp(56), dp(200), Gravity.START or Gravity.CENTER_VERTICAL).apply {
+            marginStart = dp(36)
         })
         return frame
     }
@@ -265,20 +253,30 @@ class NowPlayingActivity : Activity() {
         }
         if (s.volumeAtMs != lastVolumeAt) {
             lastVolumeAt = s.volumeAtMs
-            if (s.volume >= 0f) showVolume(s.volume)
+            if (s.volume >= 0f) showVolume(s.volume, s.volume <= 0f)
         }
         updateProgress()
     }
 
-    private fun showVolume(level: Float) {
+    private fun showVolume(level: Float, muted: Boolean) {
         setDimmed(false)
-        volumeIcon.setImageResource(if (level <= 0f) R.drawable.ic_volume_off else R.drawable.ic_volume)
-        volumeBar.progress = (level * PROGRESS_MAX).toInt()
-        volumeText.text = String.format(Locale.US, "%d%%", (level * 100f).toInt())
-        volumePanel.animate().cancel()
-        volumePanel.alpha = 1f
+        volumeHud.setLevel(level, muted)
+        volumeHud.animate().cancel()
+        if (volumeHud.alpha < 1f) volumeHud.translationX = -dp(12).toFloat()
+        volumeHud.animate().alpha(1f).translationX(0f).setDuration(180).start()
         handler.removeCallbacks(hideVolume)
         handler.postDelayed(hideVolume, VOLUME_SHOWN_MS)
+    }
+
+    private fun pollSystemVolume() {
+        val volume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+        val muted = audioManager.isStreamMute(AudioManager.STREAM_MUSIC)
+        if (volume != lastStreamVolume || muted != lastStreamMuted) {
+            val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+            showVolume(volume.toFloat() / max, muted)
+        }
+        lastStreamVolume = volume
+        lastStreamMuted = muted
     }
 
     private fun updateProgress() {
@@ -347,6 +345,7 @@ class NowPlayingActivity : Activity() {
         const val PROGRESS_INTERVAL_MS = 500L
         const val DIM_AFTER_MS = 2 * 60 * 1000L
         const val VOLUME_SHOWN_MS = 2000L
+        const val VOLUME_POLL_MS = 250L
         const val DIM_ALPHA = 0.3f
         const val SHIFT_INTERVAL_MS = 60 * 1000L
 
