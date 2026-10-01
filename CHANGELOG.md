@@ -25,6 +25,15 @@
   "interactive", so the wake-up returned early and the player started underneath it.
 - Return To Player (on by default): the player takes over from the system screensaver while music plays, starting
   in its minimal stage, and a media key on the remote shows it for six seconds while it is hidden.
+- Song changes no longer look doubled or stutter. A skip arrives in steps (title, a 100-200 ms gap the sender reports as
+  a pause, then album, progress and cover), and each step moved the cover: it shrank, sprang back and slid at once. A
+  pause right after a song change is now held back and dropped if playing resumes; the same cover again (the next song
+  of an album) stays put; a cover that arrives mid-slide replaces the one sliding in; a slow cover no longer clears the
+  old one after 1.5 s (now 4 s); the album fades in instead of popping in. Cover decoding and its colours moved off the
+  main thread, and unchanged media metadata is no longer republished half a dozen times per skip.
+- The burn-in drift was a glide that never stopped, so the player (and the photo viewer) redrew at 60 frames per second
+  for as long as they were up, using most of the stick's GPU. It now moves in short hops, and the settled backdrop no
+  longer draws the gradient under its opaque dithered copy.
 
 ## [0.2.0] - fork
 

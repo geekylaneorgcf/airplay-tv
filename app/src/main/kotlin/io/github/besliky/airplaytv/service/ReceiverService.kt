@@ -41,6 +41,7 @@ import io.github.besliky.airplaytv.ui.MirrorActivity
 import io.github.besliky.airplaytv.ui.NowPlayingActivity
 import io.github.besliky.airplaytv.ui.PhotoActivity
 import java.util.concurrent.Executors
+import java.util.zip.CRC32
 
 /**
  * Headless AirPlay receiver. Runs as a foreground service for as long as AirPlay is
@@ -76,6 +77,10 @@ class ReceiverService : Service(), NativeBridge.Listener {
     private var lyricsKey = ""
     private var photoToken = 0
     private val photoExecutor = Executors.newSingleThreadExecutor { task -> Thread(task, "photo-decode").apply { isDaemon = true } }
+    private var coverToken = 0
+    private var coverCrc = -1L
+    private val coverExecutor = Executors.newSingleThreadExecutor { task -> Thread(task, "cover-decode").apply { isDaemon = true } }
+    private var publishedMetadata: List<Any?>? = null
     private var lyricsToken = 0
     private val lyricsRunnable = Runnable { requestLyrics() }
 
@@ -295,6 +300,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
         if (NativeBridge.listener === this) NativeBridge.listener = null
         stopVolumeWatch()
         photoExecutor.shutdownNow()
+        coverExecutor.shutdownNow()
         releaseMediaSession()
         RemoteControl.client = null
         dacp?.shutdown()
@@ -646,6 +652,8 @@ class ReceiverService : Service(), NativeBridge.Listener {
         handler.removeCallbacks(lyricsRunnable)
         lyricsToken++
         lyricsKey = ""
+        coverToken++ // a cover still being decoded belongs to the session that ended
+        coverCrc = -1L
         phoneGain = -1f
         trackKey = ""
         trackHistory.clear()
@@ -734,10 +742,30 @@ class ReceiverService : Service(), NativeBridge.Listener {
     }
 
     override fun onArtwork(data: ByteArray) {
-        val bitmap = decodeArtwork(data) ?: return
-        val colors = ArtworkColors.from(bitmap)
-        ReceiverState.update { it.copy(artwork = bitmap, artworkSeq = it.artworkSeq + 1, artColors = colors) }
-        refreshMediaSession()
+        val crc = CRC32().also { it.update(data) }.value
+        if (crc == coverCrc && ReceiverState.current.artwork != null) {
+            // The same cover again (the next song of an album, or a sender that sends it twice): keep the
+            // picture and the colours made from it, and only say that one arrived, so the player does not
+            // slide the cover in over itself. A different cover still being decoded is out of date now.
+            Log.i(SESSION, "the same cover again (${data.size} bytes)")
+            coverToken++
+            ReceiverState.update { it.copy(artworkSeq = it.artworkSeq + 1) }
+            return
+        }
+        // Decoding and picking colours take a few dozen milliseconds. Done here they would hold up the main
+        // thread, and with it every animation, in the very moment the player slides the new cover in.
+        val token = ++coverToken
+        coverExecutor.execute {
+            val bitmap = decodeArtwork(data) ?: return@execute
+            val colors = ArtworkColors.from(bitmap)
+            handler.post {
+                if (token != coverToken) return@post // a newer cover came meanwhile, or the session ended
+                Log.i(SESSION, "new cover (${data.size} bytes)")
+                coverCrc = crc
+                ReceiverState.update { it.copy(artwork = bitmap, artworkSeq = it.artworkSeq + 1, artColors = colors) }
+                refreshMediaSession()
+            }
+        }
     }
 
     override fun onProgress(start: Long, current: Long, end: Long) {
@@ -860,19 +888,26 @@ class ReceiverService : Service(), NativeBridge.Listener {
         )
         session.isActive = true
         mediaSession = session
+        publishedMetadata = null // a new session knows nothing yet
         refreshMediaSession()
     }
 
     private fun refreshMediaSession() {
         val session = mediaSession ?: return
         val s = ReceiverState.current
-        val metadata = MediaMetadata.Builder()
-            .putString(MediaMetadata.METADATA_KEY_TITLE, s.title)
-            .putString(MediaMetadata.METADATA_KEY_ARTIST, s.artist)
-            .putString(MediaMetadata.METADATA_KEY_ALBUM, s.album)
-        if (s.durationMs > 0) metadata.putLong(MediaMetadata.METADATA_KEY_DURATION, s.durationMs)
-        s.artwork?.let { metadata.putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, it) }
-        session.setMetadata(metadata.build())
+        // A skip makes half a dozen updates in half a second, most of them only the position or the pause flag.
+        // The metadata (with the cover, which the system scales and copies each time) goes out only when it changed.
+        val key = listOf(s.title, s.artist, s.album, s.durationMs, s.artwork?.let { System.identityHashCode(it) })
+        if (key != publishedMetadata) {
+            publishedMetadata = key
+            val metadata = MediaMetadata.Builder()
+                .putString(MediaMetadata.METADATA_KEY_TITLE, s.title)
+                .putString(MediaMetadata.METADATA_KEY_ARTIST, s.artist)
+                .putString(MediaMetadata.METADATA_KEY_ALBUM, s.album)
+            if (s.durationMs > 0) metadata.putLong(MediaMetadata.METADATA_KEY_DURATION, s.durationMs)
+            s.artwork?.let { metadata.putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, it) }
+            session.setMetadata(metadata.build())
+        }
         val actions = PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_PLAY_PAUSE or
             PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_PREVIOUS or
             PlaybackState.ACTION_FAST_FORWARD or PlaybackState.ACTION_REWIND
@@ -889,6 +924,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
     private fun releaseMediaSession() {
         val session = mediaSession ?: return
         mediaSession = null
+        publishedMetadata = null
         session.isActive = false
         session.release()
     }

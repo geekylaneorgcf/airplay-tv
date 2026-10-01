@@ -11,8 +11,8 @@ import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.DecelerateInterpolator
-import android.view.animation.LinearInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
 import io.github.besliky.airplaytv.service.ReceiverState
@@ -40,13 +40,16 @@ class PhotoActivity : Activity() {
 
     private val stateListener: (ReceiverState.Snapshot) -> Unit = { render(it) }
 
+    // Short hops, not a glide that never stops: a full-screen photo redrawn sixty times a second for as long as it
+    // is up keeps the GPU busy for nothing, and a new photo then has no room to dissolve in smoothly.
     private val orbitTick = object : Runnable {
         override fun run() {
-            val t = (SystemClock.elapsedRealtime() + ORBIT_STEP_MS) / 60000.0
+            val t = (SystemClock.elapsedRealtime() + ORBIT_HOP_MS) / 60000.0
             val density = resources.displayMetrics.density
             val x = (ORBIT_X_DP * density * sin(2 * PI * t / 11.0)).toFloat()
             val y = (ORBIT_Y_DP * density * sin(2 * PI * t / 7.0 + 0.7)).toFloat()
-            orbitLayer.animate().translationX(x).translationY(y).setDuration(ORBIT_STEP_MS).setInterpolator(LinearInterpolator()).start()
+            orbitLayer.animate().translationX(x).translationY(y).setDuration(ORBIT_HOP_MS)
+                .setInterpolator(AccelerateDecelerateInterpolator()).start()
             handler.postDelayed(this, ORBIT_STEP_MS)
         }
     }
@@ -163,7 +166,8 @@ class PhotoActivity : Activity() {
 
     private companion object {
         const val DISSOLVE_MS = 700L
-        const val ORBIT_STEP_MS = 10_000L
+        const val ORBIT_STEP_MS = 6_000L
+        const val ORBIT_HOP_MS = 700L
         const val ORBIT_X_DP = 14f
         const val ORBIT_Y_DP = 9f
         const val DIM_AFTER_MS = 3 * 60_000L

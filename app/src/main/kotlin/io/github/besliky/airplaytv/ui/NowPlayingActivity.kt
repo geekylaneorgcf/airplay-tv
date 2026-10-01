@@ -24,6 +24,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 import android.view.WindowManager
+import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.LinearInterpolator
 import android.view.animation.OvershootInterpolator
@@ -71,7 +72,12 @@ class NowPlayingActivity : Activity() {
     private var lastVolumeAt = 0L
     private var shownVolume = -1f
     private var lastLyricsKey: Any? = null
-    private var previousAlbum = ""
+    private var knownAlbum = ""
+    private var albumBefore = "" // the album of the song that just ended; a new song from it keeps the cover
+    private var lastTrackChangeAt = 0L
+    private var slideStartedAt = 0L
+    private var shownCover: Bitmap? = null
+    private var pausePending = false
     private var shownPlaying = true
     private var lyricsOpen = false
     private var preview: String? = null
@@ -179,8 +185,20 @@ class NowPlayingActivity : Activity() {
     private val hideLyricsVolume = Runnable { lyricsVolume.animate().alpha(0f).setDuration(300).start() }
     private val hideHint = Runnable { hintView.animate().alpha(0f).setDuration(300).start() }
     private val clearArtwork = Runnable {
+        Log.i(MOTION, "no cover came for the new song: clearing the old one")
         showArtwork(null, latest.trackDirection, animate = true)
         applyArtworkColors(ArtworkColors.NEUTRAL, animate = true)
+    }
+
+    /** The pause that was held back after a song change turned out to be real. */
+    private val showPaused = Runnable {
+        pausePending = false
+        if (!latest.playing && shownPlaying) {
+            Log.i(MOTION, "still paused: showing it")
+            shownPlaying = false
+            applyPlaying(false, animate = true)
+            pausedSince = SystemClock.elapsedRealtime()
+        }
     }
 
     // ---------------------------------------------------------------- lifecycle
@@ -600,7 +618,7 @@ class NowPlayingActivity : Activity() {
             setTextNow(albumView, s.album)
             artistView.visibility = if (s.artist.isBlank()) View.GONE else View.VISIBLE
             albumView.visibility = if (s.album.isBlank()) View.GONE else View.VISIBLE
-            previousAlbum = s.album
+            knownAlbum = s.album
             pausedSince = if (s.playing) 0L else SystemClock.elapsedRealtime()
             showArtwork(s.artwork, 1, animate = false)
             artworkColors = s.artColors ?: ArtworkColors.NEUTRAL
@@ -618,23 +636,34 @@ class NowPlayingActivity : Activity() {
                 lastTrackSeq = s.trackSeq
                 onTrackChanged(s)
             } else if (s.title != previous.title || s.artist != previous.artist || s.album != previous.album) {
-                setTextNow(titleView, displayTitle(s))
-                setTextNow(artistView, s.artist)
-                setTextNow(albumView, s.album)
-                artistView.visibility = if (s.artist.isBlank()) View.GONE else View.VISIBLE
-                albumView.visibility = if (s.album.isBlank()) View.GONE else View.VISIBLE
-                renderAod(s)
-                renderLyricsHeader(s)
+                onDetailsChanged(s)
             }
             if (s.artworkSeq != lastArtworkSeq) {
                 lastArtworkSeq = s.artworkSeq
                 onArtworkArrived(s)
             }
             if (s.playing != shownPlaying) {
-                shownPlaying = s.playing
-                applyPlaying(s.playing, animate = true)
-                pausedSince = if (s.playing) 0L else SystemClock.elapsedRealtime()
-                if (s.playing && presence == Presence.BLANK) setPresence(Presence.MINIMAL)
+                val hold = if (s.playing) 0L else TrackMotion.pauseHoldMs(SystemClock.elapsedRealtime() - lastTrackChangeAt)
+                if (hold > 0L) {
+                    // Right after a song change the audio runs dry for a moment; that is the gap between two
+                    // songs, not a pause. Show it only if it is still there when the hold is over.
+                    if (!pausePending) {
+                        pausePending = true
+                        Log.i(MOTION, "paused right after a song change: holding it back")
+                        handler.postDelayed(showPaused, hold)
+                    }
+                } else {
+                    handler.removeCallbacks(showPaused)
+                    pausePending = false
+                    shownPlaying = s.playing
+                    applyPlaying(s.playing, animate = true)
+                    pausedSince = if (s.playing) 0L else SystemClock.elapsedRealtime()
+                    if (s.playing && presence == Presence.BLANK) setPresence(Presence.MINIMAL)
+                }
+            } else if (pausePending) {
+                Log.i(MOTION, "playing again: the pause was only the gap between two songs")
+                handler.removeCallbacks(showPaused)
+                pausePending = false
             }
         }
 
@@ -655,6 +684,10 @@ class NowPlayingActivity : Activity() {
 
     private fun onTrackChanged(s: ReceiverState.Snapshot) {
         val dir = s.trackDirection
+        lastTrackChangeAt = SystemClock.elapsedRealtime()
+        albumBefore = knownAlbum
+        knownAlbum = s.album
+        Log.i(MOTION, "song changed (direction $dir), album now \"${s.album}\"")
         swapText(titleView, displayTitle(s), dir, 0)
         swapText(artistView, s.artist, dir, 50)
         swapText(albumView, s.album, dir, 100)
@@ -670,22 +703,58 @@ class NowPlayingActivity : Activity() {
             setPresence(Presence.ACTIVE)
         }
 
-        // The cover normally arrives within a moment of the track info; if it does not, the new track
-        // has none and the old one has to go. A cover that arrived just before the info is kept.
+        // The cover usually arrives within a moment of the track info, but a sender fetching it over the
+        // network can be slow, and clearing the old one early shows two slides: out to nothing, then in. So
+        // the old cover stays for a good while; only a song that really has none loses it. A cover that
+        // arrived just before the info is kept, and so is the cover of the same album (seen once its name
+        // follows, see onDetailsChanged).
         handler.removeCallbacks(clearArtwork)
-        val sameAlbum = s.album.isNotBlank() && s.album == previousAlbum
+        val sameAlbum = s.album.isNotBlank() && s.album == albumBefore
         if (!sameAlbum && SystemClock.elapsedRealtime() - lastArtworkAt > ARTWORK_GRACE_MS) {
-            handler.postDelayed(clearArtwork, ARTWORK_WAIT_MS)
+            handler.postDelayed(clearArtwork, TrackMotion.COVER_WAIT_MS)
         }
-        previousAlbum = s.album
+    }
+
+    /**
+     * The same song with more to say: the album usually follows the title by half a second. Only what
+     * changed moves, and nothing that is still sliding in is cut short.
+     */
+    private fun onDetailsChanged(s: ReceiverState.Snapshot) {
+        val dir = s.trackDirection
+        artistView.visibility = if (s.artist.isBlank()) View.GONE else View.VISIBLE
+        albumView.visibility = if (s.album.isBlank()) View.GONE else View.VISIBLE
+        swapText(titleView, displayTitle(s), dir, 0)
+        swapText(artistView, s.artist, dir, 50)
+        swapText(albumView, s.album, dir, 100)
+        if (s.album.isNotBlank()) {
+            // A new song of the album that was already showing keeps its cover.
+            if (s.album == albumBefore) handler.removeCallbacks(clearArtwork)
+            knownAlbum = s.album
+        }
+        renderAod(s)
+        renderLyricsHeader(s)
     }
 
     private fun onArtworkArrived(s: ReceiverState.Snapshot) {
         handler.removeCallbacks(clearArtwork)
-        lastArtworkAt = SystemClock.elapsedRealtime()
-        showArtwork(s.artwork, s.trackDirection, animate = true)
-        artworkColors = s.artColors ?: ArtworkColors.NEUTRAL
-        applyArtworkColors(artworkColors, animate = true)
+        val now = SystemClock.elapsedRealtime()
+        lastArtworkAt = now
+        val cover = s.artwork
+        val move = TrackMotion.coverMove(cover != null && cover === shownCover, now - slideStartedAt)
+        Log.i(MOTION, "cover arrived: $move")
+        when (move) {
+            TrackMotion.CoverMove.KEEP -> Unit
+            TrackMotion.CoverMove.REPLACE -> {
+                artFront.setImageBitmap(cover)
+                lyricsArt.setImageBitmap(cover)
+                shownCover = cover
+            }
+            TrackMotion.CoverMove.SLIDE -> showArtwork(cover, s.trackDirection, animate = true)
+        }
+        if (move != TrackMotion.CoverMove.KEEP) {
+            artworkColors = s.artColors ?: ArtworkColors.NEUTRAL
+            applyArtworkColors(artworkColors, animate = true)
+        }
         renderAod(s)
     }
 
@@ -721,6 +790,7 @@ class NowPlayingActivity : Activity() {
         outgoing.animate().cancel()
         incoming.setImageBitmap(bitmap)
         lyricsArt.setImageBitmap(bitmap)
+        shownCover = bitmap
         incoming.bringToFront()
         artFront = incoming
         if (!animate) {
@@ -731,12 +801,15 @@ class NowPlayingActivity : Activity() {
             outgoing.alpha = 0f
             return
         }
+        slideStartedAt = SystemClock.elapsedRealtime()
         val shift = dpf(ART_SHIFT_DP) * direction
         incoming.alpha = 0f
         incoming.translationX = shift
         incoming.scaleX = 0.92f
         incoming.scaleY = 0.92f
-        incoming.animate().alpha(1f).translationX(0f).scaleX(1f).scaleY(1f).setDuration(ART_IN_MS)
+        // No end action, listener or layer on these two: then the framework runs them on the render thread, where
+        // they keep moving smoothly even if the main thread is busy for a moment.
+        incoming.animate().alpha(1f).translationX(0f).scaleX(1f).scaleY(1f).setDuration(TrackMotion.SLIDE_MS)
             .setInterpolator(DecelerateInterpolator(1.8f)).start()
         outgoing.animate().alpha(0f).translationX(-shift * 0.6f).scaleX(0.92f).scaleY(0.92f).setDuration(ART_OUT_MS).start()
     }
@@ -1184,12 +1257,17 @@ class NowPlayingActivity : Activity() {
         }
     }
 
-    /** Moves the whole layout a few pixels along a very slow loop, so no pixel stays lit for hours. */
+    /**
+     * Moves the whole layout a pixel or two along a very slow loop, so no pixel stays lit for hours. It moves
+     * in short hops: a glide that never stops makes the screen redraw sixty times a second for as long as the
+     * player is up, which on this stick used up most of the GPU and left song changes without room to animate.
+     */
     private fun orbit() {
-        val t = (SystemClock.elapsedRealtime() + ORBIT_STEP_MS) / 60000.0
+        val t = (SystemClock.elapsedRealtime() + ORBIT_HOP_MS) / 60000.0
         val x = dpf(ORBIT_X_DP) * sin(2 * PI * t / ORBIT_PERIOD_X_MIN).toFloat()
         val y = dpf(ORBIT_Y_DP) * sin(2 * PI * t / ORBIT_PERIOD_Y_MIN + 0.7).toFloat()
-        orbitLayer.animate().translationX(x).translationY(y).setDuration(ORBIT_STEP_MS).setInterpolator(LinearInterpolator()).start()
+        orbitLayer.animate().translationX(x).translationY(y).setDuration(ORBIT_HOP_MS)
+            .setInterpolator(AccelerateDecelerateInterpolator()).start()
     }
 
     // ---------------------------------------------------------------- sleep after music
@@ -1249,6 +1327,7 @@ class NowPlayingActivity : Activity() {
         const val EXTRA_IDLE = "idle"
         const val EXTRA_PEEK = "peek"
         private const val TAG = "AirPlayTV-Presence"
+        private const val MOTION = "AirPlayTV-Motion"
 
         private const val NEUTRAL_TOP = 0xFF17171A.toInt()
         private const val NEUTRAL_BOTTOM = 0xFF0B0B0D.toInt()
@@ -1276,10 +1355,8 @@ class NowPlayingActivity : Activity() {
         private const val TEXT_OUT_MS = 130L
         private const val TEXT_IN_MS = 300L
         private const val ART_SHIFT_DP = 56f
-        private const val ART_IN_MS = 460L
         private const val ART_OUT_MS = 380L
         private const val PALETTE_MS = 700L
-        private const val ARTWORK_WAIT_MS = 1500L
         private const val ARTWORK_GRACE_MS = 1200L
 
         // Burn-in care: when each stage starts, and how the layout drifts.
@@ -1287,7 +1364,8 @@ class NowPlayingActivity : Activity() {
         private const val PEEK_CLOSE_MS = 6000L
         private const val DIM_ALPHA = 0.35f
         private const val AOD_ALPHA = 0.7f
-        private const val ORBIT_STEP_MS = 10_000L
+        private const val ORBIT_STEP_MS = 6_000L
+        private const val ORBIT_HOP_MS = 700L
         private const val ORBIT_X_DP = 22f
         private const val ORBIT_Y_DP = 14f
         private const val ORBIT_PERIOD_X_MIN = 11.0

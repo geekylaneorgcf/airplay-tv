@@ -81,6 +81,7 @@ class BackdropView(context: Context) : View(context) {
             val pixels = IntArray(w * h)
             Dither.gradient(pixels, w, h, from, to)
             val bitmap = Bitmap.createBitmap(pixels, w, h, Bitmap.Config.ARGB_8888)
+            bitmap.setHasAlpha(false) // every pixel is opaque: the GPU can overwrite instead of blend
             handler.post {
                 if (token != generation || !isAttachedToWindow) return@post
                 dithered = bitmap
@@ -99,10 +100,16 @@ class BackdropView(context: Context) : View(context) {
     }
 
     override fun onDraw(canvas: Canvas) {
+        val bitmap = dithered?.takeIf { it.width == width && it.height == height }
+        if (bitmap != null && fade >= 1f) {
+            // Settled: the dithered picture is opaque and covers the view, so the gradient under it is not
+            // drawn. One full-screen pass less on every frame the player redraws.
+            canvas.drawBitmap(bitmap, 0f, 0f, null)
+            return
+        }
         gradient.setBounds(0, 0, width, height)
         gradient.draw(canvas)
-        val bitmap = dithered
-        if (bitmap != null && fade > 0f && bitmap.width == width && bitmap.height == height) {
+        if (bitmap != null && fade > 0f) {
             paint.alpha = (fade * 255f).toInt().coerceIn(0, 255)
             canvas.drawBitmap(bitmap, 0f, 0f, paint)
         }
