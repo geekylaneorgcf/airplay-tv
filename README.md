@@ -14,8 +14,8 @@
 | Pause detection | A pause is detected from the audio running dry (YouTube Music sends no FLUSH when pausing), and the stale progress update sent at a pause is discarded. |
 | Remote control | The Fire remote's play/pause/next/previous (and OK/left/right) control the phone through DACP; media keys also work while the screen is not focused. |
 | One volume | The phone's slider and the TV remote's volume/mute keys drive the same volume inside the app (the stick's HDMI output stays at full scale and Fire OS gives apps no volume keys, so the system volume number is used as the input). |
-| Animations | Slide in the direction of travel for next/previous, cover shrinks while paused, backdrop tinted from the cover. |
-| Lyrics (opt-in) | Synced lyrics from [lrclib.net](https://lrclib.net); only title and artist are sent. Off by default, the only feature that uses the internet. Down opens them, Up/Back closes. |
+| Animations | Slide in the direction of travel for next/previous, cover shrinks while paused, backdrop tinted from the cover (dithered once it holds still, so a dark gradient does not show one-level bands on an OLED). |
+| Lyrics (opt-in) | Synced lyrics from [lrclib.net](https://lrclib.net); only title and artist are sent. Off by default, the only feature that uses the internet. Down opens them, Up/Back closes. A title such as "Song (feat. X)" is searched again without the decoration, a lookup that failed (offline, rate limit) is retried instead of being reported as "no lyrics", and another cut of a song still gives its words as plain lyrics. |
 | OLED care | Slow orbit of the layout, dim after 90 s, drifting card on black after 5 min, black when paused for 15 min. |
 | Sleep after music (opt-in) | Turns the TV off again a few minutes after the music stops, only if AirPlay woke it and nobody touched the remote. Needs a one-time accessibility-service setup, see below. |
 | Photos | The receiver already advertised photo support (inherited feature bits) but refused every HTTP request. It now handles `GET /server-info`, `POST /reverse`, `PUT /photo` with the asset cache (`cacheOnly`/`displayCached`), `POST /stop`. |
@@ -23,18 +23,26 @@
 
 ### Settings (open the app on the TV)
 - **Lyrics**: Off by default. Turning it on explains what is sent.
-- **Sleep After Music**: Off / 2 / 5 / 10 / 20 minutes. Needs the accessibility service:
-  `adb shell settings put secure enabled_accessibility_services io.github.besliky.airplaytv/io.github.besliky.airplaytv.service.SleepService`
-  and `adb shell settings put secure accessibility_enabled 1` (add to the existing colon-separated list if you already use one).
+- **Sleep After Music**: Off / 2 / 5 / 10 / 20 minutes. Needs the accessibility service, switched on once from a computer:
+  ```sh
+  adb shell settings put secure enabled_accessibility_services io.github.besliky.airplaytv/.service.SleepService
+  adb shell settings put secure accessibility_enabled 1
+  ```
+  (`/.service.SleepService` is the short form of the full class name and means the same; add it to the existing
+  colon-separated list if you already use another accessibility service.)
   Fire OS protects its own sleep action with a signature permission, so no normal app can do this without it.
 
 ### Looking at the screen without a phone
 ```sh
 adb shell am start -n io.github.besliky.airplaytv/.ui.MainActivity --es preview now
 ```
-Modes: `now`, `pause`, `lyrics`, `lyricsnet` (real lookup), `dim`, `ambient`, `blank`, `goodnight`, `volume`, `next`, `previous`,
-`photo`, `photo2`. It uses invented data and puts the real state back when you press Back. Capture the TV output with
-`adb exec-out screencap -p > shot.png`.
+Modes: `now`, `pause`, `lyrics`, `lyricsnet` (real lookup), `nolyrics`, `lyricsloading`, `lyricsdown`, `dim`, `ambient`,
+`blank`, `goodnight`, `volume`, `next`, `previous`, `photo`, `photo2`. It uses invented data and puts the real state back when
+you press Back. Capture the TV output with `adb exec-out screencap -p > shot.png`.
+
+Dialogs can be looked at the same way without changing a setting: `dialog-sleep`, `dialog-overlay`, `dialog-lyrics`,
+`dialog-reset`. `dither` shows four strips of one dark gradient (plain, framework dither flag, software dither, the Now Playing
+backdrop) to compare banding.
 
 ### Known limits
 - YouTube and other apps' in-app **AirPlay video** (the cast button) is not supported (`POST /play` is refused and logged);

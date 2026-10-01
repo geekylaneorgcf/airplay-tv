@@ -36,6 +36,13 @@ class SleepService : AccessibilityService() {
         /** True while the user has switched the service on. */
         val isEnabled: Boolean get() = instance != null
 
+        /**
+         * The service's name as `enabled_accessibility_services` takes it, in the short form Android
+         * accepts (`package/.service.SleepService`), which is half the length of the full one to type.
+         */
+        fun component(packageName: String, className: String = SleepService::class.java.name): String =
+            if (className.startsWith("$packageName.")) "$packageName/${className.removePrefix(packageName)}" else "$packageName/$className"
+
         /** Puts the device to sleep: the screen turns off and the TV follows over HDMI-CEC. */
         fun sleepNow(): Boolean {
             val service = instance ?: return false

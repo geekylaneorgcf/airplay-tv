@@ -79,7 +79,7 @@ class NowPlayingActivity : Activity() {
     private val startedAt = SystemClock.elapsedRealtime()
 
     // ---- views ----
-    private lateinit var backdrop: GradientDrawable
+    private lateinit var backdrop: BackdropView
     private lateinit var orbitLayer: FrameLayout
     private lateinit var stage: FrameLayout
     private lateinit var content: LinearLayout
@@ -255,10 +255,10 @@ class NowPlayingActivity : Activity() {
         val medium = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         val light = Typeface.create("sans-serif", Typeface.NORMAL)
 
-        backdrop = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(NEUTRAL_TOP, NEUTRAL_BOTTOM))
+        backdrop = BackdropView(this)
         val root = FrameLayout(this)
         root.clipChildren = false
-        root.background = backdrop
+        root.addView(backdrop, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
         // ---- artwork: two layers so one cover can slide out while the next slides in
         artA = coverView()
@@ -683,7 +683,7 @@ class NowPlayingActivity : Activity() {
     }
 
     private fun applyPalette() {
-        backdrop.setColors(intArrayOf(shownTop, shownBottom))
+        backdrop.setColors(shownTop, shownBottom)
         val fill = blend(shownAccent, Color.WHITE, 0.45f)
         val track = blend(0xFF2E2E32.toInt(), shownAccent, 0.14f)
         for (bar in arrayOf(progressBar, volumeBar, lyricsProgress, lyricsVolumeBar)) {
@@ -838,6 +838,7 @@ class NowPlayingActivity : Activity() {
             ReceiverState.LyricsState.OFF -> getString(R.string.lyrics_off)
             ReceiverState.LyricsState.LOADING -> getString(R.string.lyrics_loading)
             ReceiverState.LyricsState.NOT_FOUND -> getString(R.string.lyrics_not_found)
+            ReceiverState.LyricsState.UNAVAILABLE -> getString(R.string.lyrics_unavailable)
             ReceiverState.LyricsState.FOUND -> if (s.lyrics?.instrumental == true) getString(R.string.lyrics_instrumental) else ""
         }
         lyricsStatus.text = status
@@ -1111,6 +1112,7 @@ class NowPlayingActivity : Activity() {
             "goodnight" -> startGoodnight(5 * 60_000L)
             "lyrics" -> handler.postDelayed({ openLyrics() }, 700)
             "lyricsnet" -> handler.postDelayed({ openLyrics() }, 4500)
+            "nolyrics", "lyricsloading", "lyricsdown" -> handler.postDelayed({ openLyrics() }, 700)
         }
     }
 

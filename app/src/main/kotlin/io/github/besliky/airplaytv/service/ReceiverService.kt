@@ -178,11 +178,34 @@ class ReceiverService : Service(), NativeBridge.Listener {
         lyricsKey = key
         val token = ++lyricsToken
         ReceiverState.update { it.copy(lyricsState = LyricsState.LOADING, lyrics = null) }
-        LyricsRepository.load(s.title, s.artist, s.durationMs, BuildConfig.VERSION_NAME) { result ->
+        lookUpLyrics(token, s.title, s.artist, s.durationMs, attempt = 0)
+    }
+
+    /**
+     * One lookup for the track of [token]. A lookup that failed (no network, rate limit, server error) is
+     * not the same as a song without lyrics, so it is tried again a few times, with the screen still
+     * saying "Looking for lyrics…", before it is reported as unavailable.
+     */
+    private fun lookUpLyrics(token: Int, title: String, artist: String, durationMs: Long, attempt: Int) {
+        LyricsRepository.load(title, artist, durationMs, BuildConfig.VERSION_NAME) { outcome ->
             handler.post {
                 if (token != lyricsToken) return@post // another track was requested meanwhile
-                ReceiverState.update {
-                    it.copy(lyricsState = if (result != null) LyricsState.FOUND else LyricsState.NOT_FOUND, lyrics = result)
+                when (outcome) {
+                    is LyricsRepository.Outcome.Found ->
+                        ReceiverState.update { it.copy(lyricsState = LyricsState.FOUND, lyrics = outcome.lyrics) }
+                    LyricsRepository.Outcome.NotFound ->
+                        ReceiverState.update { it.copy(lyricsState = LyricsState.NOT_FOUND, lyrics = null) }
+                    LyricsRepository.Outcome.Failed ->
+                        if (attempt < LYRICS_RETRY_MS.size) {
+                            handler.postDelayed({
+                                if (token != lyricsToken) return@postDelayed
+                                // the track length may have arrived since the first try
+                                val length = ReceiverState.current.durationMs.takeIf { it > 0 } ?: durationMs
+                                lookUpLyrics(token, title, artist, length, attempt + 1)
+                            }, LYRICS_RETRY_MS[attempt])
+                        } else {
+                            ReceiverState.update { it.copy(lyricsState = LyricsState.UNAVAILABLE, lyrics = null) }
+                        }
                 }
             }
         }
@@ -845,6 +868,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
 
         private const val TRACK_HISTORY = 8
         private const val LYRICS_DELAY_MS = 800L
+        private val LYRICS_RETRY_MS = longArrayOf(4_000, 12_000, 30_000)
 
         private const val VOLUME_WATCH_MS = 150L
         private const val STREAM_CENTER = 8

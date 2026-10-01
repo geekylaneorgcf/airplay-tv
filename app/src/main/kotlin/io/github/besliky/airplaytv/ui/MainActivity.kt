@@ -75,6 +75,13 @@ class MainActivity : SettingsPage() {
         if (intent == null) return
         val mode = intent.getStringExtra(NowPlayingActivity.EXTRA_PREVIEW) ?: return
         intent.removeExtra(NowPlayingActivity.EXTRA_PREVIEW)
+        when (mode) {
+            "dialog-sleep" -> return showSleepSetup()
+            "dialog-overlay" -> return showOverlaySetup()
+            "dialog-lyrics" -> return Dialogs.message(this, getString(R.string.dialog_lyrics_title), getString(R.string.dialog_lyrics_message))
+            "dialog-reset" -> return Dialogs.confirm(this, R.string.dialog_reset_title, R.string.dialog_reset_message, R.string.dialog_reset_confirm) {}
+            "dither" -> return DitherPreview.show(this)
+        }
         val target = if (mode.startsWith("photo")) PhotoActivity::class.java else NowPlayingActivity::class.java
         startActivity(Intent(this, target).putExtra(NowPlayingActivity.EXTRA_PREVIEW, mode))
     }
@@ -92,10 +99,29 @@ class MainActivity : SettingsPage() {
         val choices = Settings.SLEEP_CHOICES
         val next = choices[(choices.indexOf(settings.sleepAfterMinutes) + 1) % choices.size]
         settings.sleepAfterMinutes = next
-        if (next > 0 && !SleepService.isEnabled) {
-            val component = "$packageName/${SleepService::class.java.name}"
-            Dialogs.message(this, getString(R.string.dialog_sleep_title), getString(R.string.dialog_sleep_message, component))
-        }
+        if (next > 0 && !SleepService.isEnabled) showSleepSetup()
+    }
+
+    private fun showSleepSetup() {
+        Dialogs.steps(
+            this,
+            getString(R.string.dialog_sleep_title),
+            getString(R.string.dialog_sleep_intro),
+            listOf(
+                "adb shell settings put secure enabled_accessibility_services ${SleepService.component(packageName)}",
+                "adb shell settings put secure accessibility_enabled 1",
+            ),
+            getString(R.string.dialog_sleep_outro),
+        )
+    }
+
+    private fun showOverlaySetup() {
+        Dialogs.steps(
+            this,
+            getString(R.string.dialog_overlay_title),
+            getString(R.string.dialog_overlay_intro),
+            listOf("adb shell appops set $packageName SYSTEM_ALERT_WINDOW allow"),
+        )
     }
 
     private fun toggleLyrics() {
@@ -175,9 +201,9 @@ class MainActivity : SettingsPage() {
         try {
             startActivity(intent)
         } catch (_: ActivityNotFoundException) {
-            Dialogs.message(this, getString(R.string.dialog_overlay_title), getString(R.string.dialog_overlay_message, packageName))
+            showOverlaySetup()
         } catch (_: SecurityException) {
-            Dialogs.message(this, getString(R.string.dialog_overlay_title), getString(R.string.dialog_overlay_message, packageName))
+            showOverlaySetup()
         }
     }
 

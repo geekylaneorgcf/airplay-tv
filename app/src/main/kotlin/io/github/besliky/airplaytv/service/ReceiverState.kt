@@ -53,8 +53,11 @@ object ReceiverState {
         val photoSeq: Int = 0,
     )
 
-    /** OFF: the feature is off. LOADING: a lookup is running. FOUND/NOT_FOUND: its result. */
-    enum class LyricsState { OFF, LOADING, FOUND, NOT_FOUND }
+    /**
+     * OFF: the feature is off. LOADING: a lookup is running. FOUND/NOT_FOUND: its result.
+     * UNAVAILABLE: the lyrics service could not be reached, as opposed to having no lyrics for the song.
+     */
+    enum class LyricsState { OFF, LOADING, FOUND, NOT_FOUND, UNAVAILABLE }
 
     private val handler = Handler(Looper.getMainLooper())
     private val listeners = CopyOnWriteArraySet<(Snapshot) -> Unit>()

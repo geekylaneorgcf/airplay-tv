@@ -65,7 +65,7 @@
     <string name="dialog_reset_confirm">Reset</string>
     <string name="dialog_reset_done">Pairing has been reset.</string>
     <string name="dialog_overlay_title">Open automatically</string>
-    <string name="dialog_overlay_message">To show your iPhone’s screen as soon as mirroring starts, allow AirPlay TV to display over other apps.\n\nThis TV does not offer that setting in its menus. It can be enabled once from a computer:\n\nadb shell appops set %1$s SYSTEM_ALERT_WINDOW allow</string>
+    <string name="dialog_overlay_intro">To show your iPhone’s screen as soon as mirroring starts, allow AirPlay TV to display over other apps. This TV does not offer that setting in its menus, so it has to be switched on once from a computer:</string>
     <string name="dialog_diagnostics_title">Diagnostics</string>
     <string name="dialog_diagnostics_saved">Saved to %1$s</string>
     <string name="dialog_decoder_title">Preferred Decoder</string>
@@ -78,13 +78,15 @@
     <string name="value_minutes">%1$d min</string>
     <string name="value_needs_setup">Needs setup</string>
     <string name="dialog_sleep_title">Sleep after music</string>
-    <string name="dialog_sleep_message">When AirPlay turns this TV on, it can turn itself off again a few minutes after the music stops. Android only allows that through an accessibility service, so it needs a one-time setup from a computer:\n\nadb shell settings put secure enabled_accessibility_services %1$s\nadb shell settings put secure accessibility_enabled 1\n\nIf other accessibility services are already on, add this one to the colon-separated list instead. The service does not read the screen.</string>
+    <string name="dialog_sleep_intro">When AirPlay turns this TV on, it can turn it off again a few minutes after the music stops. Android only allows that through an accessibility service, so it needs a one-time setup from a computer. Run these two commands:</string>
+    <string name="dialog_sleep_outro">If other accessibility services are already on, add this one to the colon-separated list instead. The service does not read the screen.</string>
     <string name="sleep_service_label" translatable="false">AirPlay TV sleep</string>
     <string name="sleep_service_description">Lets AirPlay TV turn the screen off a few minutes after the music stops. It does not read the screen or see what you do.</string>
     <string name="goodnight_countdown">Turning off in %1$s</string>
     <string name="lyrics_off">Lyrics are off</string>
     <string name="lyrics_loading">Looking for lyrics…</string>
     <string name="lyrics_not_found">No lyrics found</string>
+    <string name="lyrics_unavailable">Can’t reach the lyrics service right now</string>
     <string name="lyrics_instrumental">Instrumental</string>
     <string name="lyrics_hint">Down for lyrics</string>
     <string name="lyrics_turn_on">Turn on Lyrics in the AirPlay TV settings</string>

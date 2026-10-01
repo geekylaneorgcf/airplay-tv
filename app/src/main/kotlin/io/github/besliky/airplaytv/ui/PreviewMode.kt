@@ -17,9 +17,9 @@ import io.github.besliky.airplaytv.service.ReceiverState
 /**
  * Fills the shared state with a made-up track so the Now Playing screen can be looked at without a
  * phone: `adb shell am start -n <package>/.ui.MainActivity --es preview now`. The modes are `now`,
- * `pause`, `lyrics`, `dim`, `ambient`, `blank`, and `next`/`previous`, which change track after a
- * few seconds to show the transition. Nothing here touches the network, and the real state is put
- * back when the screen closes.
+ * `pause`, `lyrics`, `nolyrics`, `lyricsloading`, `lyricsdown`, `dim`, `ambient`, `blank`, and
+ * `next`/`previous`, which change track after a few seconds to show the transition. Nothing here
+ * touches the network, and the real state is put back when the screen closes.
  */
 object PreviewMode {
 
@@ -60,8 +60,13 @@ object PreviewMode {
                 volumeAtMs = now,
                 trackSeq = it.trackSeq + 1,
                 trackDirection = 1,
-                lyricsState = ReceiverState.LyricsState.FOUND,
-                lyrics = demoLyrics(),
+                lyricsState = when (mode) {
+                    "nolyrics" -> ReceiverState.LyricsState.NOT_FOUND
+                    "lyricsloading" -> ReceiverState.LyricsState.LOADING
+                    "lyricsdown" -> ReceiverState.LyricsState.UNAVAILABLE
+                    else -> ReceiverState.LyricsState.FOUND
+                },
+                lyrics = if (mode == "nolyrics" || mode == "lyricsloading" || mode == "lyricsdown") null else demoLyrics(),
             )
         }
         if (mode == "lyricsnet") lookUpLyricsForReal(first)
@@ -75,12 +80,17 @@ object PreviewMode {
     /** Runs the real lookup (a request to lrclib.net with this made-up track's title and artist) to prove the network path. */
     private fun lookUpLyricsForReal(track: Track) {
         ReceiverState.update { it.copy(lyricsState = ReceiverState.LyricsState.LOADING, lyrics = null) }
-        LyricsRepository.load(track.title, track.artist, track.seconds * 1000, "preview") { result ->
+        LyricsRepository.load(track.title, track.artist, track.seconds * 1000, "preview") { outcome ->
             handler.post {
+                val found = (outcome as? LyricsRepository.Outcome.Found)?.lyrics
                 ReceiverState.update {
                     it.copy(
-                        lyricsState = if (result != null) ReceiverState.LyricsState.FOUND else ReceiverState.LyricsState.NOT_FOUND,
-                        lyrics = result,
+                        lyricsState = when {
+                            found != null -> ReceiverState.LyricsState.FOUND
+                            outcome is LyricsRepository.Outcome.Failed -> ReceiverState.LyricsState.UNAVAILABLE
+                            else -> ReceiverState.LyricsState.NOT_FOUND
+                        },
+                        lyrics = found,
                     )
                 }
             }
