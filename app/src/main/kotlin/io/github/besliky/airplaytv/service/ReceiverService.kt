@@ -38,6 +38,7 @@ import io.github.besliky.airplaytv.service.ReceiverState.Status
 import io.github.besliky.airplaytv.ui.MirrorActivity
 import io.github.besliky.airplaytv.ui.NowPlayingActivity
 import io.github.besliky.airplaytv.ui.PhotoActivity
+import java.util.concurrent.Executors
 import kotlin.math.log10
 import kotlin.math.pow
 
@@ -72,6 +73,8 @@ class ReceiverService : Service(), NativeBridge.Listener {
     private var trackKey = ""
     private val trackHistory = ArrayList<String>()
     private var lyricsKey = ""
+    private var photoToken = 0
+    private val photoExecutor = Executors.newSingleThreadExecutor { task -> Thread(task, "photo-decode").apply { isDaemon = true } }
     private var lyricsToken = 0
     private val lyricsRunnable = Runnable { requestLyrics() }
 
@@ -264,6 +267,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
         }
         if (NativeBridge.listener === this) NativeBridge.listener = null
         stopVolumeWatch()
+        photoExecutor.shutdownNow()
         releaseMediaSession()
         RemoteControl.client = null
         dacp?.shutdown()
@@ -740,23 +744,32 @@ class ReceiverService : Service(), NativeBridge.Listener {
     }
 
     override fun onPhoto(key: String, data: ByteArray) {
-        val bitmap = PhotoDecoder.decode(data)
-        if (bitmap == null) {
-            Log.w(SESSION, "cannot decode the photo")
-            return
-        }
-        wakeDisplay()
-        ReceiverState.update { it.copy(photo = bitmap, photoSeq = it.photoSeq + 1) }
-        val intent = Intent(this, PhotoActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-        try {
-            startActivity(intent)
-        } catch (e: RuntimeException) {
-            Log.w(SESSION, "cannot open the photo screen", e)
+        // Decoding a big photo takes a moment, so it runs off the main thread. The token makes sure a
+        // photo that finishes decoding after a newer one or after the end of the session is dropped.
+        val token = ++photoToken
+        photoExecutor.execute {
+            val bitmap = PhotoDecoder.decode(data)
+            handler.post {
+                if (token != photoToken) return@post
+                if (bitmap == null) {
+                    Log.w(SESSION, "cannot decode the photo")
+                    return@post
+                }
+                wakeDisplay()
+                ReceiverState.update { it.copy(photo = bitmap, photoSeq = it.photoSeq + 1) }
+                val intent = Intent(this, PhotoActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                try {
+                    startActivity(intent)
+                } catch (e: RuntimeException) {
+                    Log.w(SESSION, "cannot open the photo screen", e)
+                }
+            }
         }
     }
 
     override fun onPhotoStop() {
+        photoToken++
         ReceiverState.update { it.copy(photo = null) }
     }
 

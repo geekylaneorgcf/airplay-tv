@@ -1,3 +1,49 @@
+# AirPlay TV (geekylaneorgcf fork)
+
+> **This is a fork of [besliky/airplay-tv](https://github.com/besliky/airplay-tv)**, tuned for a Fire TV Stick 4K Max
+> on an OLED TV, mostly used for AirPlay **music** from YouTube Music. Everything below the line is the original README.
+> The original is mirroring-first; this fork makes music a first-class use.
+
+## What this fork adds
+
+| Area | What it does |
+| --- | --- |
+| Wake from sleep | A sender that connects while the stick sleeps turns the screen on (HDMI-CEC then switches the TV on), also when playback resumes after a long pause. |
+| Now Playing screen | Opens by itself for audio-only senders: cover, title, artist, album, progress with elapsed and remaining time, rounded transport buttons, volume bar. |
+| Track info | The core now reads DMAP track info, cover art and progress that iOS pushes (they were accepted and ignored before). |
+| Pause detection | A pause is detected from the audio running dry (YouTube Music sends no FLUSH when pausing), and the stale progress update sent at a pause is discarded. |
+| Remote control | The Fire remote's play/pause/next/previous (and OK/left/right) control the phone through DACP; media keys also work while the screen is not focused. |
+| One volume | The phone's slider and the TV remote's volume/mute keys drive the same volume inside the app (the stick's HDMI output stays at full scale and Fire OS gives apps no volume keys, so the system volume number is used as the input). |
+| Animations | Slide in the direction of travel for next/previous, cover shrinks while paused, backdrop tinted from the cover. |
+| Lyrics (opt-in) | Synced lyrics from [lrclib.net](https://lrclib.net); only title and artist are sent. Off by default, the only feature that uses the internet. Down opens them, Up/Back closes. |
+| OLED care | Slow orbit of the layout, dim after 90 s, drifting card on black after 5 min, black when paused for 15 min. |
+| Sleep after music (opt-in) | Turns the TV off again a few minutes after the music stops, only if AirPlay woke it and nobody touched the remote. Needs a one-time accessibility-service setup, see below. |
+| Photos | The receiver already advertised photo support (inherited feature bits) but refused every HTTP request. It now handles `GET /server-info`, `POST /reverse`, `PUT /photo` with the asset cache (`cacheOnly`/`displayCached`), `POST /stop`. |
+| Signing | Releases are signed with a stable key so updates install over the previous one with `adb install -r`. |
+
+### Settings (open the app on the TV)
+- **Lyrics**: Off by default. Turning it on explains what is sent.
+- **Sleep After Music**: Off / 2 / 5 / 10 / 20 minutes. Needs the accessibility service:
+  `adb shell settings put secure enabled_accessibility_services io.github.besliky.airplaytv/io.github.besliky.airplaytv.service.SleepService`
+  and `adb shell settings put secure accessibility_enabled 1` (add to the existing colon-separated list if you already use one).
+  Fire OS protects its own sleep action with a signature permission, so no normal app can do this without it.
+
+### Looking at the screen without a phone
+```sh
+adb shell am start -n io.github.besliky.airplaytv/.ui.MainActivity --es preview now
+```
+Modes: `now`, `pause`, `lyrics`, `lyricsnet` (real lookup), `dim`, `ambient`, `blank`, `goodnight`, `volume`, `next`, `previous`,
+`photo`, `photo2`. It uses invented data and puts the real state back when you press Back. Capture the TV output with
+`adb exec-out screencap -p > shot.png`.
+
+### Known limits
+- YouTube and other apps' in-app **AirPlay video** (the cast button) is not supported (`POST /play` is refused and logged);
+  Screen Mirroring is. Audio-only AirPlay from music apps is the main use.
+- Photos: implemented from the unofficial protocol notes and a loopback test; not yet verified against every iOS version. Slideshows are refused.
+- Apps that forbid screen recording (Netflix etc.) mirror black.
+
+---
+
 # AirPlay TV
 
 **Screen mirroring from iPhone and iPad to Android TV, the way a TV with built-in AirPlay does it.**

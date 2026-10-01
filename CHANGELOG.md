@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0] - fork
+
+See the "What this fork adds" table in the README. In short: wake from sleep, a Now Playing screen with
+track info, cover, progress, transport buttons and volume; pause detection; remote control through DACP;
+one shared volume; animations; opt-in lyrics; OLED care; opt-in sleep after music; AirPlay photos;
+stable release signing. The native core gained tests for the metadata, remote identity and photo paths.
+
 ## [0.1.0] - 2026-09-30
 
 First release.
