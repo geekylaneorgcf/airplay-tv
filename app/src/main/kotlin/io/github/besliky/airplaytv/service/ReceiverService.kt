@@ -37,6 +37,7 @@ import io.github.besliky.airplaytv.service.ReceiverState.LyricsState
 import io.github.besliky.airplaytv.service.ReceiverState.Status
 import io.github.besliky.airplaytv.ui.MirrorActivity
 import io.github.besliky.airplaytv.ui.NowPlayingActivity
+import io.github.besliky.airplaytv.ui.PhotoActivity
 import kotlin.math.log10
 import kotlin.math.pow
 
@@ -736,6 +737,27 @@ class ReceiverService : Service(), NativeBridge.Listener {
             showNowPlaying()
         }
         refreshMediaSession()
+    }
+
+    override fun onPhoto(key: String, data: ByteArray) {
+        val bitmap = PhotoDecoder.decode(data)
+        if (bitmap == null) {
+            Log.w(SESSION, "cannot decode the photo")
+            return
+        }
+        wakeDisplay()
+        ReceiverState.update { it.copy(photo = bitmap, photoSeq = it.photoSeq + 1) }
+        val intent = Intent(this, PhotoActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        try {
+            startActivity(intent)
+        } catch (e: RuntimeException) {
+            Log.w(SESSION, "cannot open the photo screen", e)
+        }
+    }
+
+    override fun onPhotoStop() {
+        ReceiverState.update { it.copy(photo = null) }
     }
 
     override fun onRemote(dacpId: String, activeRemote: String) {

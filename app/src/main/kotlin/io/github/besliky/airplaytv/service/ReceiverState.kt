@@ -48,6 +48,9 @@ object ReceiverState {
         val lyrics: Lyrics? = null,
         /** AirPlay turned the screen on for this session and nobody has touched the remote since. */
         val wokeDevice: Boolean = false,
+        /** The photo being shown from the sender's Photos app, and a counter that changes with every photo. */
+        val photo: Bitmap? = null,
+        val photoSeq: Int = 0,
     )
 
     /** OFF: the feature is off. LOADING: a lookup is running. FOUND/NOT_FOUND: its result. */

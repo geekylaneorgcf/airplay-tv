@@ -55,6 +55,8 @@ static struct {
     jmethodID progress;
     jmethodID playing;
     jmethodID remote;
+    jmethodID photo;
+    jmethodID photo_stop;
 } g_cb;
 
 static pthread_mutex_t g_server_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -272,6 +274,35 @@ static void ev_remote(void *ctx, const char *dacp_id, const char *active_remote)
     }
 }
 
+static void ev_photo(void *ctx, const char *asset_key, const uint8_t *data, size_t len) {
+    (void) ctx;
+    JNIEnv *env = get_env();
+    if (!env || !data || len == 0 || len > 0x7fffffff) {
+        return;
+    }
+    jbyteArray key = utf8_bytes(env, asset_key);
+    jbyteArray pic = (*env)->NewByteArray(env, (jsize) len);
+    if (!pic) {
+        check_exception(env);
+        if (key) {
+            (*env)->DeleteLocalRef(env, key);
+        }
+        return;
+    }
+    (*env)->SetByteArrayRegion(env, pic, 0, (jsize) len, (const jbyte *) data);
+    (*env)->CallStaticVoidMethod(env, g_bridge, g_cb.photo, key, pic);
+    check_exception(env);
+    (*env)->DeleteLocalRef(env, pic);
+    if (key) {
+        (*env)->DeleteLocalRef(env, key);
+    }
+}
+
+static void ev_photo_stop(void *ctx) {
+    (void) ctx;
+    call_void(g_cb.photo_stop);
+}
+
 static void ev_progress(void *ctx, uint32_t start, uint32_t current, uint32_t end) {
     (void) ctx;
     JNIEnv *env = get_env();
@@ -420,6 +451,8 @@ static jint JNICALL n_start(JNIEnv *env, jclass cls, jbyteArray name, jbyteArray
         .artwork = ev_artwork,
         .progress = ev_progress,
         .remote = ev_remote,
+        .photo = ev_photo,
+        .photo_stop = ev_photo_stop,
     };
 
     pthread_mutex_lock(&g_server_lock);
@@ -677,6 +710,8 @@ JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *reserved) {
     g_cb.progress = (*env)->GetStaticMethodID(env, g_bridge, "onProgress", "(JJJ)V");
     g_cb.playing = (*env)->GetStaticMethodID(env, g_bridge, "onPlaying", "(Z)V");
     g_cb.remote = (*env)->GetStaticMethodID(env, g_bridge, "onRemote", "([B[B)V");
+    g_cb.photo = (*env)->GetStaticMethodID(env, g_bridge, "onPhoto", "([B[B)V");
+    g_cb.photo_stop = (*env)->GetStaticMethodID(env, g_bridge, "onPhotoStop", "()V");
     if ((*env)->ExceptionCheck(env)) {
         (*env)->ExceptionClear(env);
         return JNI_ERR;

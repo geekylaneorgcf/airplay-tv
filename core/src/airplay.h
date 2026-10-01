@@ -51,6 +51,11 @@ typedef struct {
     /* The sender's remote-control (DACP) identity, from the DACP-ID and Active-Remote headers.
      * Called when it first appears or changes. Optional. */
     void (*remote)(void *ctx, const char *dacp_id, const char *active_remote);
+    /* A photo from the sender's Photos app (PUT /photo): an encoded JPEG or PNG, only valid during
+     * the call. asset_key identifies it in the sender's cache. Optional. */
+    void (*photo)(void *ctx, const char *asset_key, const uint8_t *data, size_t len);
+    /* The photo session is over (POST /stop, or the sender closed its event connection). Optional. */
+    void (*photo_stop)(void *ctx);
 } airplay_events_t;
 
 typedef struct {

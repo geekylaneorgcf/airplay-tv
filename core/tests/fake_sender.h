@@ -83,6 +83,11 @@ int fs_send_sync(fake_sender_t *f);
 int fs_set_volume(fake_sender_t *f, float db);
 /* Sends a SET_PARAMETER with an arbitrary content type. Returns 0 on a 200 reply. */
 int fs_set_parameter(fake_sender_t *f, const char *content_type, const void *body, size_t len);
+/* Sends one HTTP/1.1 request (like the Photos app does) on the connection and reads the reply. headers is
+ * a block of "Name: value\r\n" lines or NULL. Returns 0 and sets *status; the reply head followed by its
+ * body is copied into resp (NUL terminated, truncated to resp_cap) when resp is not NULL. */
+int fs_http(fake_sender_t *f, const char *method, const char *url, const char *headers, const void *body, size_t len,
+            int *status, char *resp, size_t resp_cap);
 int fs_feedback(fake_sender_t *f);
 /* type 0 tears down the whole session. */
 int fs_teardown(fake_sender_t *f, int type);

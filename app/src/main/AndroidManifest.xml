@@ -49,6 +49,15 @@
             android:name=".ui.AdvancedActivity"
             android:exported="false" />
 
+        <activity
+            android:name=".ui.PhotoActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:taskAffinity=".photo"
+            android:theme="@style/Theme.AirPlayTV.Mirror" />
+
         <service
             android:name=".service.SleepService"
             android:exported="false"

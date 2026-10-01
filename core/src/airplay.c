@@ -55,6 +55,19 @@
 typedef struct session session_t;
 typedef struct conn conn_t;
 
+/* Photos the sender asked us to keep (X-Apple-AssetAction: cacheOnly), so it can show them later
+ * with displayCached without sending them again. Bounded in count and in bytes. */
+#define PHOTO_CACHE_MAX 8
+#define PHOTO_CACHE_BYTES (48u * 1024u * 1024u)
+#define REVERSED_MAX_AGE_NS (6ull * 3600ull * NS_PER_SEC)
+
+typedef struct {
+    char key[64];
+    uint8_t *data;
+    size_t len;
+    uint64_t used_ns;
+} photo_entry_t;
+
 struct conn {
     int fd;
     struct sockaddr_storage peer;
@@ -65,6 +78,7 @@ struct conn {
     uint64_t last_rx_ns;
     uint64_t partial_since_ns;
     bool rtsp;
+    bool reversed;            /* upgraded to the sender's event channel (POST /reverse); stays open while idle */
     bool close_after_reply;
     bool closing;
     pairing_session_t pair;
@@ -96,6 +110,9 @@ struct airplay_server {
     uint64_t features;
     char pk_hex[65];
     char device_id_str[18];
+    photo_entry_t photos[PHOTO_CACHE_MAX];
+    size_t photo_bytes;
+    bool photo_shown;         /* a photo is on screen, so the end of the photo session must be reported */
     char dacp_id[48];         /* last remote-control identity reported to the events */
     char active_remote[48];
 
@@ -341,6 +358,190 @@ static void session_destroy(airplay_server_t *s, session_t *session) {
 
 static void hide_pin(airplay_server_t *s);
 
+/* ------------------------------------------------------------------------- */
+/* photos (HTTP): PUT /photo, POST /reverse, POST /stop, GET /server-info     */
+
+static void photo_cache_clear(airplay_server_t *s) {
+    for (int i = 0; i < PHOTO_CACHE_MAX; i++) {
+        free(s->photos[i].data);
+        memset(&s->photos[i], 0, sizeof(s->photos[i]));
+    }
+    s->photo_bytes = 0;
+}
+
+static photo_entry_t *photo_cache_find(airplay_server_t *s, const char *key) {
+    for (int i = 0; i < PHOTO_CACHE_MAX; i++) {
+        if (s->photos[i].data && strcmp(s->photos[i].key, key) == 0) {
+            return &s->photos[i];
+        }
+    }
+    return NULL;
+}
+
+static void photo_cache_drop(airplay_server_t *s, photo_entry_t *e) {
+    s->photo_bytes -= e->len;
+    free(e->data);
+    memset(e, 0, sizeof(*e));
+}
+
+/* Keeps a copy of a photo under its asset key, evicting the least recently used ones when the cache
+ * would grow past its limits. A photo that alone exceeds the byte limit is not kept. */
+static void photo_cache_put(airplay_server_t *s, const char *key, const uint8_t *data, size_t len) {
+    if (!key[0] || strlen(key) >= sizeof(s->photos[0].key) || len == 0 || len > PHOTO_CACHE_BYTES) {
+        return;
+    }
+    photo_entry_t *old = photo_cache_find(s, key);
+    if (old) {
+        photo_cache_drop(s, old);
+    }
+    for (;;) {
+        photo_entry_t *free_slot = NULL;
+        photo_entry_t *oldest = NULL;
+        for (int i = 0; i < PHOTO_CACHE_MAX; i++) {
+            photo_entry_t *e = &s->photos[i];
+            if (!e->data) {
+                free_slot = e;
+            } else if (!oldest || e->used_ns < oldest->used_ns) {
+                oldest = e;
+            }
+        }
+        if (free_slot && s->photo_bytes + len <= PHOTO_CACHE_BYTES) {
+            uint8_t *copy = (uint8_t *) malloc(len);
+            if (!copy) {
+                return;
+            }
+            memcpy(copy, data, len);
+            str_copy(free_slot->key, sizeof(free_slot->key), key);
+            free_slot->data = copy;
+            free_slot->len = len;
+            free_slot->used_ns = time_mono_ns();
+            s->photo_bytes += len;
+            return;
+        }
+        if (!oldest) {
+            return;
+        }
+        photo_cache_drop(s, oldest);
+    }
+}
+
+static void photo_show(airplay_server_t *s, const char *key, const uint8_t *data, size_t len) {
+    s->photo_shown = true;
+    if (s->ev.photo) {
+        s->ev.photo(s->ev.ctx, key, data, len);
+    }
+}
+
+static void photo_stop(airplay_server_t *s) {
+    photo_cache_clear(s);
+    if (s->photo_shown) {
+        s->photo_shown = false;
+        if (s->ev.photo_stop) {
+            s->ev.photo_stop(s->ev.ctx);
+        }
+    }
+}
+
+static bool is_image(const uint8_t *d, size_t n) {
+    static const uint8_t png[8] = { 0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n' };
+    return (n >= 3 && d[0] == 0xff && d[1] == 0xd8 && d[2] == 0xff) || (n >= 8 && memcmp(d, png, sizeof(png)) == 0);
+}
+
+/* HTTP replies need an explicit length; the RTSP serializer leaves it out when there is no body. */
+static void http_empty(rtsp_reply_t *reply, int status, const char *reason) {
+    rtsp_reply_status(reply, status, reason);
+    rtsp_reply_header(reply, "Content-Length", "0");
+}
+
+static bool path_is(const char *url, const char *path) {
+    size_t n = strlen(path);
+    return strncmp(url, path, n) == 0 && (url[n] == '\0' || url[n] == '?');
+}
+
+static void handle_server_info(airplay_server_t *s, rtsp_reply_t *reply) {
+    char xml[768];
+    int n = snprintf(xml, sizeof(xml),
+                     "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                     "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" "
+                     "\"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
+                     "<plist version=\"1.0\"><dict>\n"
+                     "<key>deviceid</key><string>%s</string>\n"
+                     "<key>features</key><integer>%llu</integer>\n"
+                     "<key>model</key><string>%s</string>\n"
+                     "<key>protovers</key><string>1.0</string>\n"
+                     "<key>srcvers</key><string>%s</string>\n"
+                     "</dict></plist>\n",
+                     s->device_id_str, (unsigned long long) s->features, AIRPLAY_MODEL, AIRPLAY_SOURCE_VERSION);
+    if (n <= 0 || (size_t) n >= sizeof(xml) || !rtsp_reply_body_copy(reply, "text/x-apple-plist+xml", xml, (size_t) n)) {
+        http_empty(reply, 500, "Internal Server Error");
+        return;
+    }
+    rtsp_reply_status(reply, 200, "OK");
+}
+
+static void handle_photo(airplay_server_t *s, const rtsp_request_t *req, rtsp_reply_t *reply) {
+    const char *key = rtsp_header(req, "X-Apple-AssetKey");
+    const char *action = rtsp_header(req, "X-Apple-AssetAction");
+    if (!key) {
+        key = "";
+    }
+    if (action && str_ieq(action, "displayCached")) {
+        photo_entry_t *e = key[0] ? photo_cache_find(s, key) : NULL;
+        if (!e) {
+            LOG_W(AIRPLAY, "photo was not cached, asking the sender to send it again");
+            http_empty(reply, 412, "Precondition Failed");
+            return;
+        }
+        e->used_ns = time_mono_ns();
+        photo_show(s, key, e->data, e->len);
+        http_empty(reply, 200, "OK");
+        return;
+    }
+    if (!req->body || req->body_len == 0 || !is_image(req->body, req->body_len)) {
+        LOG_W(AIRPLAY, "photo upload without a JPEG or PNG body");
+        http_empty(reply, 400, "Bad Request");
+        return;
+    }
+    photo_cache_put(s, key, req->body, req->body_len);
+    if (!(action && str_ieq(action, "cacheOnly"))) {
+        photo_show(s, key, req->body, req->body_len);
+    }
+    http_empty(reply, 200, "OK");
+}
+
+/* The HTTP/1.1 side of AirPlay on the same port as RTSP: photos from the Photos app. Everything else
+ * (AirPlay video playback, slideshows) is refused, and logged so a refused attempt can be recognised. */
+static void handle_http(airplay_server_t *s, conn_t *c, const rtsp_request_t *req, rtsp_reply_t *reply) {
+    const char *m = req->method;
+    const char *url = req->url;
+    if (s->cfg.require_pin && !c->pair_trusted) {
+        LOG_W(AIRPLAY, "HTTP %s %s refused: this receiver requires a PIN", m, url);
+        http_empty(reply, 403, "Forbidden");
+        reply->close_connection = true;
+        return;
+    }
+    if (strcmp(m, "GET") == 0 && path_is(url, "/server-info")) {
+        handle_server_info(s, reply);
+    } else if (strcmp(m, "POST") == 0 && path_is(url, "/reverse")) {
+        /* The sender turns this connection around to receive events from us. We have none to send, but
+         * it must stay open for as long as the photo session lasts. */
+        rtsp_reply_status(reply, 101, "Switching Protocols");
+        rtsp_reply_header(reply, "Upgrade", "PTTH/1.0");
+        rtsp_reply_header(reply, "Connection", "Upgrade");
+        c->reversed = true;
+    } else if (strcmp(m, "PUT") == 0 && path_is(url, "/photo")) {
+        handle_photo(s, req, reply);
+    } else if (strcmp(m, "POST") == 0 && path_is(url, "/stop")) {
+        photo_stop(s);
+        http_empty(reply, 200, "OK");
+    } else {
+        /* AirPlay video (HLS/URL playback) and slideshows are not offered by this receiver. */
+        LOG_W(AIRPLAY, "HTTP %s %s is not supported", m, url);
+        http_empty(reply, 501, "Not Implemented");
+        reply->close_connection = true;
+    }
+}
+
 static void conn_close(airplay_server_t *s, int index) {
     conn_t *c = s->conns[index];
     if (!c) {
@@ -353,6 +554,9 @@ static void conn_close(airplay_server_t *s, int index) {
     }
     if (c->session) {
         session_destroy(s, c->session);
+    }
+    if (c->reversed) {
+        photo_stop(s);
     }
     net_close(&c->fd);
     pairing_session_clear(&c->pair);
@@ -1176,9 +1380,7 @@ static void handle_request(airplay_server_t *s, conn_t *c, const rtsp_request_t 
     }
 
     if (!rtsp) {
-        /* AirPlay video (HLS/URL playback) is not offered by this receiver. */
-        rtsp_reply_status(reply, 501, "Not Implemented");
-        reply->close_connection = true;
+        handle_http(s, c, req, reply);
         return;
     }
     c->rtsp = true;
@@ -1358,6 +1560,11 @@ static void check_timeouts(airplay_server_t *s, uint64_t now) {
             uint64_t last = MAX(c->last_rx_ns, s->last_media_ns);
             if (now - last > SESSION_TIMEOUT_NS) {
                 LOG_W(SESSION, "sender stopped responding, ending session");
+                close_it = true;
+            }
+        } else if (c->reversed) {
+            /* An idle event channel is normal while a photo stays on screen. */
+            if (now - c->created_ns > REVERSED_MAX_AGE_NS) {
                 close_it = true;
             }
         } else if (now - c->last_rx_ns > IDLE_TIMEOUT_NS) {
@@ -1559,6 +1766,7 @@ void airplay_server_destroy(airplay_server_t *s) {
         return;
     }
     airplay_server_stop(s);
+    photo_cache_clear(s);
     airplay_server_set_paired_clients(s, NULL, 0);
     pthread_mutex_destroy(&s->paired_lock);
     secure_zero(&s->identity, sizeof(s->identity));

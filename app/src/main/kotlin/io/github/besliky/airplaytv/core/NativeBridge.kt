@@ -36,6 +36,12 @@ object NativeBridge {
 
         /** The sender's remote-control (DACP) identity. */
         fun onRemote(dacpId: String, activeRemote: String)
+
+        /** A photo to show: an encoded JPEG or PNG. */
+        fun onPhoto(key: String, data: ByteArray)
+
+        /** The photo session is over. */
+        fun onPhotoStop()
     }
 
     /** Decoder low-latency options, see video_decoder.h. */
@@ -130,6 +136,16 @@ object NativeBridge {
 
     @JvmStatic
     fun onPlaying(playing: Boolean) = post { it.onPlaying(playing) }
+
+    @JvmStatic
+    fun onPhoto(key: ByteArray?, data: ByteArray?) {
+        if (data == null || data.isEmpty()) return
+        val k = key.utf8()
+        post { it.onPhoto(k, data) }
+    }
+
+    @JvmStatic
+    fun onPhotoStop() = post { it.onPhotoStop() }
 
     @JvmStatic
     fun onRemote(dacpId: ByteArray?, activeRemote: ByteArray?) {

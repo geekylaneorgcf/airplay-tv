@@ -75,7 +75,8 @@ class MainActivity : SettingsPage() {
         if (intent == null) return
         val mode = intent.getStringExtra(NowPlayingActivity.EXTRA_PREVIEW) ?: return
         intent.removeExtra(NowPlayingActivity.EXTRA_PREVIEW)
-        startActivity(Intent(this, NowPlayingActivity::class.java).putExtra(NowPlayingActivity.EXTRA_PREVIEW, mode))
+        val target = if (mode.startsWith("photo")) PhotoActivity::class.java else NowPlayingActivity::class.java
+        startActivity(Intent(this, target).putExtra(NowPlayingActivity.EXTRA_PREVIEW, mode))
     }
 
     private fun sleepValue(): String {

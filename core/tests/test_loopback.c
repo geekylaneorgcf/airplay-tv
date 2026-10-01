@@ -69,6 +69,12 @@ typedef struct {
     int remotes;
     char dacp_id[64];
     char active_remote[64];
+    int photos;
+    int photo_stops;
+    char photo_key[64];
+    size_t photo_len;
+    uint8_t photo_first;
+    uint8_t photo_last;
 } capture_t;
 
 static capture_t g_cap;
@@ -213,6 +219,24 @@ static void ev_progress(void *ctx, uint32_t start, uint32_t current, uint32_t en
     pthread_mutex_unlock(&g_cap.lock);
 }
 
+static void ev_photo(void *ctx, const char *key, const uint8_t *data, size_t len) {
+    (void) ctx;
+    pthread_mutex_lock(&g_cap.lock);
+    str_copy(g_cap.photo_key, sizeof(g_cap.photo_key), key);
+    g_cap.photo_len = len;
+    g_cap.photo_first = len ? data[0] : 0;
+    g_cap.photo_last = len ? data[len - 1] : 0;
+    g_cap.photos++;
+    pthread_mutex_unlock(&g_cap.lock);
+}
+
+static void ev_photo_stop(void *ctx) {
+    (void) ctx;
+    pthread_mutex_lock(&g_cap.lock);
+    g_cap.photo_stops++;
+    pthread_mutex_unlock(&g_cap.lock);
+}
+
 static void ev_remote(void *ctx, const char *dacp_id, const char *active_remote) {
     (void) ctx;
     pthread_mutex_lock(&g_cap.lock);
@@ -256,6 +280,7 @@ static airplay_server_t *start_server(bool require_pin, int *port) {
     airplay_events_t ev = {
         .session_started = ev_started, .session_ended = ev_ended, .pin_display = ev_pin, .client_paired = ev_paired,
         .track_info = ev_track_info, .artwork = ev_artwork, .progress = ev_progress, .remote = ev_remote,
+        .photo = ev_photo, .photo_stop = ev_photo_stop,
     };
     airplay_server_t *s = airplay_server_create(&cfg, &ev, &kOps, NULL);
     if (!s) return NULL;
@@ -462,6 +487,134 @@ TEST(loopback_track_info_artwork_progress_and_remote_identity) {
     CHECK_EQ(g_cap.progresses, 1);
 
     fs_close(&f);
+    airplay_server_destroy(s);
+}
+
+/* Makes a JPEG-looking payload: the JPEG start marker, a counting pattern, and a distinct last byte. */
+static uint8_t *fake_jpeg(size_t len) {
+    uint8_t *p = (uint8_t *) malloc(len);
+    if (!p) return NULL;
+    for (size_t i = 0; i < len; i++) p[i] = (uint8_t) (i * 7u);
+    p[0] = 0xff;
+    p[1] = 0xd8;
+    p[2] = 0xff;
+    p[len - 1] = 0xd9;
+    return p;
+}
+
+TEST(loopback_http_photos) {
+    int port = 0;
+    airplay_server_t *s = start_server(false, &port);
+    CHECK(s != NULL);
+    fake_sender_t f;
+    CHECK(fs_connect(&f, "127.0.0.1", (uint16_t) port) == 0);
+    int status = 0;
+    char resp[2048];
+
+    /* the capability query */
+    CHECK(fs_http(&f, "GET", "/server-info", NULL, NULL, 0, &status, resp, sizeof(resp)) == 0);
+    CHECK_EQ(status, 200);
+    CHECK(strstr(resp, "<key>deviceid</key>") != NULL);
+    CHECK(strstr(resp, "<key>features</key>") != NULL);
+
+    /* the event channel upgrade keeps the connection open */
+    CHECK(fs_http(&f, "POST", "/reverse", "Connection: Upgrade\r\nUpgrade: PTTH/1.0\r\nX-Apple-Purpose: event\r\n", NULL, 0,
+                  &status, resp, sizeof(resp)) == 0);
+    CHECK_EQ(status, 101);
+    CHECK(strstr(resp, "Upgrade: PTTH/1.0") != NULL);
+
+    /* a photo is shown */
+    size_t n = 3000;
+    uint8_t *jpeg = fake_jpeg(n);
+    CHECK(jpeg != NULL);
+    fake_sender_t g;
+    CHECK(fs_connect(&g, "127.0.0.1", (uint16_t) port) == 0);
+    CHECK(fs_http(&g, "PUT", "/photo", "X-Apple-AssetKey: key-one\r\nX-Apple-Transition: Dissolve\r\n", jpeg, n, &status,
+                  resp, sizeof(resp)) == 0);
+    CHECK_EQ(status, 200);
+    CHECK(strstr(resp, "Content-Length: 0") != NULL);
+    CHECK(wait_for(&g_cap.photos, 1));
+    CHECK(strcmp(g_cap.photo_key, "key-one") == 0);
+    CHECK_EQ(g_cap.photo_len, n);
+    CHECK_EQ(g_cap.photo_first, 0xff);
+    CHECK_EQ(g_cap.photo_last, 0xd9);
+
+    /* cacheOnly keeps a photo without showing it, displayCached shows it later from the cache */
+    uint8_t *second = fake_jpeg(5000);
+    CHECK(second != NULL);
+    CHECK(fs_http(&g, "PUT", "/photo", "X-Apple-AssetKey: key-two\r\nX-Apple-AssetAction: cacheOnly\r\n", second, 5000, &status,
+                  NULL, 0) == 0);
+    CHECK_EQ(status, 200);
+    CHECK_EQ(g_cap.photos, 1);
+    CHECK(fs_http(&g, "PUT", "/photo", "X-Apple-AssetKey: key-two\r\nX-Apple-AssetAction: displayCached\r\n", NULL, 0, &status,
+                  NULL, 0) == 0);
+    CHECK_EQ(status, 200);
+    CHECK(wait_for(&g_cap.photos, 2));
+    CHECK(strcmp(g_cap.photo_key, "key-two") == 0);
+    CHECK_EQ(g_cap.photo_len, 5000);
+
+    /* an uncached key makes the sender send the photo again */
+    CHECK(fs_http(&g, "PUT", "/photo", "X-Apple-AssetKey: never-sent\r\nX-Apple-AssetAction: displayCached\r\n", NULL, 0,
+                  &status, NULL, 0) == 0);
+    CHECK_EQ(status, 412);
+    CHECK_EQ(g_cap.photos, 2);
+
+    /* not an image */
+    uint8_t junk[64];
+    memset(junk, 'x', sizeof(junk));
+    CHECK(fs_http(&g, "PUT", "/photo", "X-Apple-AssetKey: bad\r\n", junk, sizeof(junk), &status, NULL, 0) == 0);
+    CHECK_EQ(status, 400);
+    CHECK_EQ(g_cap.photos, 2);
+
+    /* a large photo, bigger than the old 2 MiB limit */
+    size_t big_len = 5u * 1024u * 1024u;
+    uint8_t *big = fake_jpeg(big_len);
+    CHECK(big != NULL);
+    CHECK(fs_http(&g, "PUT", "/photo", "X-Apple-AssetKey: big\r\n", big, big_len, &status, NULL, 0) == 0);
+    CHECK_EQ(status, 200);
+    CHECK(wait_for(&g_cap.photos, 3));
+    CHECK_EQ(g_cap.photo_len, big_len);
+    free(big);
+
+    /* the sender ends the session */
+    CHECK(fs_http(&g, "POST", "/stop", "X-Apple-Session-ID: abc\r\n", NULL, 0, &status, NULL, 0) == 0);
+    CHECK_EQ(status, 200);
+    CHECK(wait_for(&g_cap.photo_stops, 1));
+
+    /* anything else over HTTP (video playback, slideshows) is refused */
+    fake_sender_t h;
+    CHECK(fs_connect(&h, "127.0.0.1", (uint16_t) port) == 0);
+    CHECK(fs_http(&h, "POST", "/play", NULL, "x", 1, &status, NULL, 0) == 0);
+    CHECK_EQ(status, 501);
+
+    free(jpeg);
+    free(second);
+    fs_close(&h);
+    fs_close(&g);
+    fs_close(&f);
+    airplay_server_destroy(s);
+}
+
+TEST(loopback_closing_the_event_channel_ends_the_photo_session) {
+    int port = 0;
+    airplay_server_t *s = start_server(false, &port);
+    CHECK(s != NULL);
+    fake_sender_t f;
+    CHECK(fs_connect(&f, "127.0.0.1", (uint16_t) port) == 0);
+    int status = 0;
+    CHECK(fs_http(&f, "POST", "/reverse", "Connection: Upgrade\r\nUpgrade: PTTH/1.0\r\n", NULL, 0, &status, NULL, 0) == 0);
+    CHECK_EQ(status, 101);
+    fake_sender_t g;
+    CHECK(fs_connect(&g, "127.0.0.1", (uint16_t) port) == 0);
+    uint8_t *jpeg = fake_jpeg(1000);
+    CHECK(jpeg != NULL);
+    CHECK(fs_http(&g, "PUT", "/photo", "X-Apple-AssetKey: k\r\n", jpeg, 1000, &status, NULL, 0) == 0);
+    CHECK(wait_for(&g_cap.photos, 1));
+    free(jpeg);
+    CHECK_EQ(g_cap.photo_stops, 0);
+    fs_close(&f); /* the Photos app closes its event connection */
+    CHECK(wait_for(&g_cap.photo_stops, 1));
+    fs_close(&g);
     airplay_server_destroy(s);
 }
 

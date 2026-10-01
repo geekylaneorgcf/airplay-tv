@@ -755,6 +755,71 @@ int fs_set_volume(fake_sender_t *f, float db) {
                       NULL, NULL) == 0 && status == 200 ? 0 : -1;
 }
 
+int fs_http(fake_sender_t *f, const char *method, const char *url, const char *headers, const void *body, size_t len,
+            int *status, char *resp, size_t resp_cap) {
+    char head[1024];
+    int n = snprintf(head, sizeof(head), "%s %s HTTP/1.1\r\nHost: test\r\n%sContent-Length: %zu\r\n\r\n", method, url,
+                     headers ? headers : "", len);
+    if (n <= 0 || (size_t) n >= sizeof(head)) {
+        return -1;
+    }
+    if (send_all(f->fd, head, (size_t) n) != 0 || (len && send_all(f->fd, body, len) != 0)) {
+        return -1;
+    }
+    char buf[4096];
+    size_t got = 0;
+    char *end = NULL;
+    while (!end) {
+        if (got + 1 >= sizeof(buf) || wait_readable(f->fd, TIMEOUT_MS) != 0) {
+            return -1;
+        }
+        ssize_t r = recv(f->fd, buf + got, sizeof(buf) - 1 - got, 0);
+        if (r <= 0) {
+            return -1;
+        }
+        got += (size_t) r;
+        buf[got] = 0;
+        end = strstr(buf, "\r\n\r\n");
+    }
+    int code = 0;
+    if (sscanf(buf, "HTTP/1.1 %d", &code) != 1) {
+        return -1;
+    }
+    size_t head_len = (size_t) (end - buf) + 4;
+    size_t content_length = 0;
+    char *cl = strstr(buf, "Content-Length: ");
+    if (cl && cl < end) {
+        content_length = (size_t) strtoul(cl + 16, NULL, 10);
+    }
+    size_t total = head_len + content_length;
+    if (resp && resp_cap) {
+        size_t copy = MIN(got, resp_cap - 1);
+        memcpy(resp, buf, copy);
+        resp[copy] = 0;
+    }
+    size_t have = got;
+    while (have < total) {
+        if (wait_readable(f->fd, TIMEOUT_MS) != 0) {
+            return -1;
+        }
+        char chunk[4096];
+        ssize_t r = recv(f->fd, chunk, MIN(sizeof(chunk), total - have), 0);
+        if (r <= 0) {
+            return -1;
+        }
+        if (resp && resp_cap && have < resp_cap - 1) {
+            size_t copy = MIN((size_t) r, resp_cap - 1 - have);
+            memcpy(resp + have, chunk, copy);
+            resp[have + copy] = 0;
+        }
+        have += (size_t) r;
+    }
+    if (status) {
+        *status = code;
+    }
+    return 0;
+}
+
 int fs_set_parameter(fake_sender_t *f, const char *content_type, const void *body, size_t len) {
     int status = 0;
     return fs_request(f, "SET_PARAMETER", "rtsp://127.0.0.1/1234", content_type, body, len, &status, NULL, NULL) == 0 &&

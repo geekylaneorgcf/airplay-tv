@@ -20,7 +20,7 @@
 #include "common.h"
 
 #define RTSP_MAX_HEAD 16384
-#define RTSP_MAX_BODY (2 * 1024 * 1024)
+#define RTSP_MAX_BODY (16 * 1024 * 1024) /* a photo from the Photos app can be several MB */
 #define RTSP_MAX_HEADERS 32
 #define RTSP_MAX_NAME 48
 #define RTSP_MAX_VALUE 640

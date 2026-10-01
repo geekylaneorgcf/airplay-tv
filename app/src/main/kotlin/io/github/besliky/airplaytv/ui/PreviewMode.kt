@@ -103,6 +103,45 @@ object PreviewMode {
         handler.postDelayed(task, delayMs)
     }
 
+    private var savedPhoto: Pair<Bitmap?, Int>? = null
+
+    /** `photo` shows one made-up photo; `photo2` swaps it for another after a few seconds. */
+    fun beginPhoto(mode: String) {
+        if (savedPhoto == null) savedPhoto = Pair(ReceiverState.current.photo, ReceiverState.current.photoSeq)
+        ReceiverState.update { it.copy(photo = landscape(200f), photoSeq = it.photoSeq + 1) }
+        if (mode == "photo2") {
+            schedule(5000) { ReceiverState.update { it.copy(photo = landscape(20f), photoSeq = it.photoSeq + 1) } }
+        }
+    }
+
+    fun endPhoto() {
+        pending?.let { handler.removeCallbacks(it) }
+        pending = null
+        val before = savedPhoto ?: return
+        savedPhoto = null
+        ReceiverState.update { it.copy(photo = before.first) }
+    }
+
+    /** A made-up 3:2 picture with a horizon, a sun and a few hills. */
+    private fun landscape(hue: Float): Bitmap {
+        val w = 1800
+        val h = 1200
+        val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.shader = LinearGradient(0f, 0f, 0f, h * 0.7f, Color.HSVToColor(floatArrayOf(hue, 0.55f, 0.35f)),
+            Color.HSVToColor(floatArrayOf((hue + 25f) % 360f, 0.35f, 0.95f)), Shader.TileMode.CLAMP)
+        canvas.drawRect(0f, 0f, w.toFloat(), h.toFloat(), paint)
+        paint.shader = null
+        paint.color = Color.argb(230, 255, 240, 200)
+        canvas.drawCircle(w * 0.72f, h * 0.42f, h * 0.12f, paint)
+        paint.color = Color.HSVToColor(floatArrayOf((hue + 120f) % 360f, 0.5f, 0.25f))
+        canvas.drawOval(-w * 0.2f, h * 0.62f, w * 0.7f, h * 1.3f, paint)
+        paint.color = Color.HSVToColor(floatArrayOf((hue + 140f) % 360f, 0.5f, 0.16f))
+        canvas.drawOval(w * 0.3f, h * 0.7f, w * 1.3f, h * 1.4f, paint)
+        return bitmap
+    }
+
     fun end() {
         pending?.let { handler.removeCallbacks(it) }
         pending = null
