@@ -16,7 +16,7 @@
 | One volume | The phone's slider and the TV remote's volume/mute keys drive the same volume inside the app (the stick's HDMI output stays at full scale and Fire OS gives apps no volume keys, so the system volume number is used as the input). |
 | Animations | Slide in the direction of travel for next/previous, cover shrinks while paused, backdrop tinted from the cover (dithered once it holds still, so a dark gradient does not show one-level bands on an OLED). |
 | Lyrics (opt-in) | Synced lyrics from [lrclib.net](https://lrclib.net); only title and artist are sent. Off by default, the only feature that uses the internet. Down opens them, Up/Back closes. A title such as "Song (feat. X)" is searched again without the decoration, a lookup that failed (offline, rate limit) is retried instead of being reported as "no lyrics", and another cut of a song still gives its words as plain lyrics. |
-| OLED care | Slow orbit of the layout. With nobody using the remote: dim after 2 min (about one song), then a minimal display after 5 min (only the song, progress and times, small and dim, drifting over black), then nothing lit after 30 min; paused for 15 min lets the display sleep. A new song shows itself for a few seconds without counting as use, and neither does the phone repeating its volume. |
+| OLED care | Slow orbit of the layout. With nobody using the remote: dim after 3 min (about one song), then a minimal display after 8 min (only the song, progress and times, small and dim, drifting over black), then nothing lit after 30 min; paused for 15 min lets the display sleep. A new song shows itself for a few seconds without counting as use, and neither does the phone repeating its volume. |
 | Back to the player | Start the app from the Home screen while music plays and it opens the player instead of the settings; the remote's Menu key opens the settings from the player. |
 | Sleep after music (opt-in) | Turns the TV off again a few minutes after the music stops, only if AirPlay woke it and nobody touched the remote. Needs a one-time accessibility-service setup, see below. |
 | Photos | The receiver already advertised photo support (inherited feature bits) but refused every HTTP request. It now handles `GET /server-info`, `POST /reverse`, `PUT /photo` with the asset cache (`cacheOnly`/`displayCached`), `POST /stop`. |
@@ -40,7 +40,7 @@ adb shell am start -n io.github.besliky.airplaytv/.ui.MainActivity --es preview 
 ```
 Modes: `now`, `pause`, `lyrics`, `lyricsnet` (real lookup), `nolyrics`, `lyricsloading`, `lyricsdown`, `dim`, `minimal`, `black`,
 `blank`, `goodnight`, `volume`, `next`, `previous`, `photo`, `photo2`, and `oledcare`, which runs the whole OLED care timeline by
-itself, 60 times faster (`--ei speed 60`, so the 5 minute stage arrives after 5 seconds). It uses invented data and puts the real state back when
+itself, 60 times faster (`--ei speed 60`, so the 8 minute stage arrives after 8 seconds). It uses invented data and puts the real state back when
 you press Back. Capture the TV output with `adb exec-out screencap -p > shot.png`.
 
 Dialogs can be looked at the same way without changing a setting: `dialog-sleep`, `dialog-overlay`, `dialog-lyrics`,

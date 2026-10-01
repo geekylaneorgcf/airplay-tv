@@ -35,10 +35,10 @@ class PresenceTimeline(
     }
 
     companion object {
-        /** DIM after two minutes (one song), MINIMAL after five, BLACK after half an hour, BLANK after a quarter of an hour paused. */
+        /** DIM after three minutes (one song), MINIMAL after eight (two), BLACK after half an hour, BLANK after a quarter of an hour paused. */
         val STANDARD = PresenceTimeline(
-            dimAfterMs = 2 * 60_000L,
-            minimalAfterMs = 5 * 60_000L,
+            dimAfterMs = 3 * 60_000L,
+            minimalAfterMs = 8 * 60_000L,
             blackAfterMs = 30 * 60_000L,
             blankAfterPausedMs = 15 * 60_000L,
         )
