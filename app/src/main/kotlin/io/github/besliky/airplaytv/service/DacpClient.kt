@@ -54,14 +54,22 @@ class DacpClient(context: Context) {
         }
     }
 
-    fun send(command: String) {
+    /**
+     * Sends one command. [onStatus] hears the HTTP status the sender answered with (204 is a command done),
+     * or -1 when the command could not be sent; it runs on the sender thread, not the main thread.
+     */
+    fun send(command: String, onStatus: ((Int) -> Unit)? = null) {
         val token: String
         val h: String
         val p: Int
         synchronized(lock) {
-            token = activeRemote ?: return
+            token = activeRemote ?: run {
+                onStatus?.invoke(-1)
+                return
+            }
             h = host ?: run {
                 Log.w(TAG, "$command dropped: sender service not resolved yet")
+                onStatus?.invoke(-1)
                 return
             }
             p = port
@@ -82,9 +90,11 @@ class DacpClient(context: Context) {
                     }
                     val status = socket.getInputStream().bufferedReader(Charsets.US_ASCII).readLine()
                     Log.i(TAG, "$command -> $status")
+                    onStatus?.invoke(statusCode(status))
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "$command failed", e)
+                onStatus?.invoke(-1)
             }
         }
     }
@@ -159,6 +169,18 @@ class DacpClient(context: Context) {
         const val PLAY_PAUSE = "playpause"
         const val NEXT = "nextitem"
         const val PREVIOUS = "previtem"
+
+        /** Hold-to-scan, as an iPod does it: scanning runs from the begin command until [PLAY_RESUME]. */
+        const val BEGIN_FF = "beginff"
+        const val BEGIN_REW = "beginrew"
+        const val PLAY_RESUME = "playresume"
+
+        /** Jump to [positionMs] in the song that is playing. */
+        fun seekTo(positionMs: Long) = "setproperty?dacp.playingtime=$positionMs"
+
+        /** The code in an HTTP status line (`HTTP/1.1 204 No Content`), -1 when there is none. */
+        internal fun statusCode(statusLine: String?): Int =
+            statusLine?.trim()?.split(' ', limit = 3)?.getOrNull(1)?.toIntOrNull() ?: -1
     }
 }
 
@@ -167,7 +189,8 @@ object RemoteControl {
     @Volatile
     var client: DacpClient? = null
 
-    fun send(command: String) {
-        client?.send(command)
+    fun send(command: String, onStatus: ((Int) -> Unit)? = null) {
+        val c = client
+        if (c == null) onStatus?.invoke(-1) else c.send(command, onStatus)
     }
 }

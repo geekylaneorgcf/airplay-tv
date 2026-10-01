@@ -12,7 +12,8 @@
 | Now Playing screen | Opens by itself for audio-only senders: cover, title, artist, album, progress with elapsed and remaining time, rounded transport buttons, volume bar. |
 | Track info | The core now reads DMAP track info, cover art and progress that iOS pushes (they were accepted and ignored before). |
 | Pause detection | A pause is detected from the audio running dry (YouTube Music sends no FLUSH when pausing), and the stale progress update sent at a pause is discarded. |
-| Remote control | The Fire remote's play/pause/next/previous (and OK/left/right) control the phone through DACP; media keys also work while the screen is not focused. |
+| Remote control | The Fire remote's play/pause and next/previous media keys (and OK) control the phone through DACP; media keys also work while the screen is not focused. Left and right on the ring seek: a tap jumps 10 seconds, holding scrubs faster the longer it is held, and the phone is asked once the keys stop. Whether the sender honours a seek depends on the app (iOS' DACP is undocumented); if it does not, the player says so once and holding the key scans like an iPod's fast forward instead. |
+| TV settings button (opt-in) | The Fire remote's Menu button (the three bars next to Home) opens an LG TV's quick settings (picture mode, sound output, ...) by pressing the TV's own gear button over the network (LG webOS remote protocol). One-time setup in the app: it finds the TV, shows the certificate the TV presents (every LG TV signs its own) for the owner to trust, and the TV asks to accept the connection on its own remote. Certificates stay verified: only the one the owner confirmed is trusted. It works while the player is open; in every app with the Menu button service (below). |
 | One volume | The phone's slider and the TV remote's volume/mute keys drive the same volume inside the app (the stick's HDMI output stays at full scale and Fire OS gives apps no volume keys, so the system volume number is used as the input). |
 | Animations | Slide in the direction of travel for next/previous, cover shrinks while paused, backdrop tinted from the cover (dithered once it holds still, so a dark gradient does not show one-level bands on an OLED). |
 | Lyrics (opt-in) | Synced lyrics from [lrclib.net](https://lrclib.net); only title and artist are sent. Off by default, the only feature that uses the internet. Down opens them, Up/Back closes. A title such as "Song (feat. X)" is searched again without the decoration, a lookup that failed (offline, rate limit) is retried instead of being reported as "no lyrics", and another cut of a song still gives its words as plain lyrics. |
@@ -33,13 +34,22 @@
   (`/.service.SleepService` is the short form of the full class name and means the same; add it to the existing
   colon-separated list if you already use another accessibility service.)
   Fire OS protects its own sleep action with a signature permission, so no normal app can do this without it.
+- **TV Settings Button**: Off / Needs setup / On. Pressing the row finds an LG TV with a UPnP search, asks you to trust the
+  certificate it presents, and the TV shows a prompt to accept (with the TV's own remote). After that the Menu button opens the
+  TV's quick settings from the player. To have it in every app, the Menu button has to be taken before the app in front sees it,
+  which only an accessibility service can do (it sees the Menu key only and lets every key through while the setting is off).
+  The app shows the two commands for your stick under *Use In Every App*; they keep any services that are already on, e.g.
+  ```sh
+  adb shell settings put secure enabled_accessibility_services io.github.besliky.airplaytv/.service.MenuKeyService
+  adb shell settings put secure accessibility_enabled 1
+  ```
 
 ### Looking at the screen without a phone
 ```sh
 adb shell am start -n io.github.besliky.airplaytv/.ui.MainActivity --es preview now
 ```
 Modes: `now`, `pause`, `lyrics`, `lyricsnet` (real lookup), `nolyrics`, `lyricsloading`, `lyricsdown`, `dim`, `minimal`, `black`,
-`blank`, `goodnight`, `volume`, `next`, `previous`, `photo`, `photo2`, and `oledcare`, which runs the whole OLED care timeline by
+`blank`, `goodnight`, `volume`, `next`, `previous`, `skip` (three skips as a real session delivers them: blank album, a short pause, a late cover), `photo`, `photo2`, and `oledcare`, which runs the whole OLED care timeline by
 itself, 60 times faster (`--ei speed 60`, so the 8 minute stage arrives after 8 seconds). It uses invented data and puts the real state back when
 you press Back. Capture the TV output with `adb exec-out screencap -p > shot.png`.
 

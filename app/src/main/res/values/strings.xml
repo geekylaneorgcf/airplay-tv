@@ -82,7 +82,7 @@
     <string name="value_needs_setup">Needs setup</string>
     <string name="dialog_sleep_title">Sleep After Music</string>
     <string name="dialog_sleep_intro">When AirPlay turns this TV on, it can turn it off again a few minutes after the music stops. Android only allows that through an accessibility service, so it needs a one-time setup from a computer. Run these two commands:</string>
-    <string name="dialog_sleep_outro">If other accessibility services are already on, add this one to the colon-separated list instead. The service does not read the screen.</string>
+    <string name="dialog_sleep_outro">The commands keep any accessibility services that are already on. The service does not read the screen.</string>
     <string name="sleep_service_label" translatable="false">AirPlay TV sleep</string>
     <string name="sleep_service_description">Lets AirPlay TV turn the screen off a few minutes after the music stops. It does not read the screen or see what you do.</string>
     <string name="goodnight_countdown">Turning off in %1$s</string>
@@ -93,4 +93,40 @@
     <string name="lyrics_instrumental">Instrumental</string>
     <string name="lyrics_hint">Down for lyrics</string>
     <string name="lyrics_turn_on">Turn on Lyrics in the AirPlay TV settings</string>
+
+    <!-- TV settings button: the Fire remote's Menu button opens an LG TV's quick settings -->
+    <string name="setting_tv_menu">TV Settings Button</string>
+    <string name="tv_menu_title">TV Settings Button</string>
+    <string name="tv_menu_try">Open TV Settings Now</string>
+    <string name="tv_menu_pair_again">Set Up Again</string>
+    <string name="tv_menu_every_app">Use In Every App</string>
+    <string name="tv_menu_turn_off">Turn Off</string>
+    <string name="tv_pairing_title">Connecting to your TV</string>
+    <string name="tv_pairing_looking">Looking for your LG TV on the network…</string>
+    <string name="tv_pairing_connecting">Connecting to the TV at %1$s…</string>
+    <string name="tv_pairing_accept">Accept the request on your TV, using the TV’s own remote.</string>
+    <string name="tv_trust_title">Trust this TV?</string>
+    <string name="tv_trust_message">The TV at %1$s showed a certificate that no authority has signed, which is normal for an LG TV. Trust this one certificate, and nothing else, for the TV Settings Button?\n\nSHA-256 fingerprint:\n%2$s</string>
+    <string name="tv_trust_confirm">Trust</string>
+    <string name="tv_pairing_done_title">TV connected</string>
+    <string name="tv_pairing_done_message">Press the Menu button (the three bars next to Home) on the Fire TV remote to open the TV’s quick settings: picture mode, sound output and more. It works while the player is open. To use it in every app, switch on the Menu button service next.</string>
+    <string name="tv_pairing_failed_title">TV not connected</string>
+    <string name="tv_pairing_not_found">No LG TV answered on this network. Make sure the TV is on and on the same network as this stick, then try again.</string>
+    <string name="tv_pairing_declined">The TV did not accept this device. Run the setup again and accept the request on the TV.</string>
+    <string name="tv_pairing_unreachable">Could not reach the TV at %1$s. Is it on, and on the same network?</string>
+    <string name="tv_pairing_failed">The TV did not answer as expected.</string>
+    <string name="menu_service_label" translatable="false">AirPlay TV menu button</string>
+    <string name="menu_service_description">Lets the Menu button open the TV’s quick settings in every app. It looks at the Menu key only; it does not read the screen or see what you do.</string>
+    <string name="menu_setup_title">Menu button in every app</string>
+    <string name="menu_setup_intro">So that the Menu button opens the TV’s settings in any app, and not only in the player, it has to be taken before the app sees it. Android only allows that through an accessibility service, switched on once from a computer. Run these two commands:</string>
+    <string name="menu_setup_outro">The commands keep any accessibility services that are already on. The service looks at the Menu key only, reads no screen content, and lets every key through while the TV Settings Button is off.</string>
+    <string name="tv_menu_needs_setup">Set up the TV Settings Button in AirPlay TV first</string>
+    <string name="tv_menu_accept">Accept the request on your TV, using the TV’s own remote</string>
+    <string name="tv_menu_declined">The TV did not accept AirPlay TV. Set the TV Settings Button up again</string>
+    <string name="tv_menu_unreachable">Can’t reach the TV. Is it on?</string>
+    <string name="tv_menu_failed">The TV did not respond</string>
+    <string name="tv_menu_certificate_changed">The TV’s certificate changed. Set the TV Settings Button up again</string>
+
+    <!-- seeking from the remote -->
+    <string name="seek_unsupported">This app doesn’t allow seeking from the remote</string>
 </resources>

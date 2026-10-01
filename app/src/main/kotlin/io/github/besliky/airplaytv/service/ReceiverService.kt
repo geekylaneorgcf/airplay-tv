@@ -785,7 +785,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
         lastProgressMs = positionMs.coerceAtMost(durationMs)
         lastProgressAt = now
         ReceiverState.update {
-            it.copy(durationMs = durationMs, positionMs = lastProgressMs, positionAtMs = now)
+            it.copy(durationMs = durationMs, positionMs = lastProgressMs, positionAtMs = now, progressSeq = it.progressSeq + 1)
         }
         refreshMediaSession()
     }

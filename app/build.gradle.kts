@@ -144,6 +144,8 @@ kotlin {
 
 dependencies {
     testImplementation(libs.junit)
+    // the real org.json: the one in the Android stubs returns nothing, which says nothing about the TV messages
+    testImplementation("org.json:json:20250107")
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.ext.junit)
 }

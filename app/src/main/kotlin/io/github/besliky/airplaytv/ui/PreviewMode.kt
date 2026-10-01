@@ -18,14 +18,15 @@ import io.github.besliky.airplaytv.service.ReceiverState
  * Fills the shared state with a made-up track so the Now Playing screen can be looked at without a
  * phone: `adb shell am start -n <package>/.ui.MainActivity --es preview now`. The modes are `now`,
  * `pause`, `lyrics`, `nolyrics`, `lyricsloading`, `lyricsdown`, `dim`, `ambient`, `blank`, and
- * `next`/`previous`, which change track after a few seconds to show the transition. Nothing here
+ * `next`/`previous`, which change track after a few seconds to show the transition, and `skip`, which
+ * plays three skips the way a real session delivers them (blank album, a short pause, a late cover). Nothing here
  * touches the network, and the real state is put back when the screen closes.
  */
 object PreviewMode {
 
     private val handler = Handler(Looper.getMainLooper())
     private var saved: ReceiverState.Snapshot? = null
-    private var pending: Runnable? = null
+    private val pending = ArrayList<Runnable>()
 
     private data class Track(val title: String, val artist: String, val album: String, val hue: Float, val seconds: Long)
 
@@ -71,6 +72,12 @@ object PreviewMode {
         }
         if (mode == "lyricsnet") lookUpLyricsForReal(first)
         if (mode == "volume") schedule(3000) { changeVolume(0.35f) }
+        if (mode == "skip") {
+            // three skips like the ones a real session makes: a new song, the same album, and back
+            skip(index = 1, direction = 1, sameCover = false, at = 4000)
+            skip(index = 2, direction = 1, sameCover = true, at = 9000)
+            skip(index = 0, direction = -1, sameCover = false, at = 14000)
+        }
         if (mode == "next" || mode == "previous") {
             val direction = if (mode == "next") 1 else -1
             schedule(6000) { changeTrack(if (direction > 0) 1 else 2, direction) }
@@ -101,6 +108,41 @@ object PreviewMode {
         ReceiverState.update { it.copy(volume = level, volumeAtMs = SystemClock.elapsedRealtime()) }
     }
 
+    /**
+     * A skip as the receiver sees it from YouTube Music (read off a real session): the new title and artist with
+     * the album still blank, a pause of about 150 ms (the audio runs dry between two songs), playing again, the album,
+     * the progress from zero, and the cover. With [sameCover] the cover that arrives is the picture already on screen.
+     */
+    private fun skip(index: Int, direction: Int, sameCover: Boolean, at: Long) {
+        val track = tracks[index]
+        schedule(at) {
+            ReceiverState.update {
+                it.copy(title = track.title, artist = track.artist, album = "", trackSeq = it.trackSeq + 1, trackDirection = direction)
+            }
+        }
+        schedule(at + 300) { ReceiverState.update { it.copy(playing = false) } }
+        schedule(at + 450) { ReceiverState.update { it.copy(playing = true) } }
+        schedule(at + 520) { ReceiverState.update { it.copy(album = track.album) } }
+        schedule(at + 560) {
+            ReceiverState.update {
+                it.copy(
+                    durationMs = track.seconds * 1000,
+                    positionMs = 0,
+                    positionAtMs = SystemClock.elapsedRealtime(),
+                    progressSeq = it.progressSeq + 1,
+                )
+            }
+        }
+        schedule(at + 700) {
+            if (sameCover) {
+                ReceiverState.update { it.copy(artworkSeq = it.artworkSeq + 1) }
+            } else {
+                val art = artwork(track.hue)
+                ReceiverState.update { it.copy(artwork = art, artworkSeq = it.artworkSeq + 1, artColors = ArtworkColors.from(art)) }
+            }
+        }
+    }
+
     private fun changeTrack(index: Int, direction: Int) {
         val track = tracks[index]
         val now = SystemClock.elapsedRealtime()
@@ -126,8 +168,13 @@ object PreviewMode {
 
     private fun schedule(delayMs: Long, block: () -> Unit) {
         val task = Runnable { block() }
-        pending = task
+        pending += task
         handler.postDelayed(task, delayMs)
+    }
+
+    private fun cancelPending() {
+        pending.forEach { handler.removeCallbacks(it) }
+        pending.clear()
     }
 
     private var savedPhoto: Pair<Bitmap?, Int>? = null
@@ -142,8 +189,7 @@ object PreviewMode {
     }
 
     fun endPhoto() {
-        pending?.let { handler.removeCallbacks(it) }
-        pending = null
+        cancelPending()
         val before = savedPhoto ?: return
         savedPhoto = null
         ReceiverState.update { it.copy(photo = before.first) }
@@ -170,8 +216,7 @@ object PreviewMode {
     }
 
     fun end() {
-        pending?.let { handler.removeCallbacks(it) }
-        pending = null
+        cancelPending()
         val before = saved ?: return
         saved = null
         ReceiverState.update {

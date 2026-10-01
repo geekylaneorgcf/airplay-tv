@@ -1,0 +1,97 @@
+package io.github.besliky.airplaytv.lg
+
+import java.io.ByteArrayInputStream
+import java.io.IOException
+import java.security.KeyStore
+import java.security.MessageDigest
+import java.security.cert.CertificateFactory
+import java.security.cert.X509Certificate
+import java.util.Base64
+import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLHandshakeException
+import javax.net.ssl.SSLSocketFactory
+import javax.net.ssl.TrustManager
+import javax.net.ssl.TrustManagerFactory
+import javax.net.ssl.X509TrustManager
+
+/**
+ * Who a TLS connection to the TV may trust. A TV serves its remote-control socket with a certificate it made
+ * itself, which no certificate authority vouches for, so the normal check always fails the first time.
+ * Certificates are still always verified; nothing here accepts a certificate that was not checked:
+ *
+ * - Without a pin, only the system's own trust anchors are accepted, so the first connection to a TV fails. The
+ *   failure carries the certificate the TV showed ([Untrusted]), which the app puts in front of the owner.
+ * - With a pin, exactly that one certificate is the trust anchor, which is what the owner confirmed. Any other
+ *   certificate (a different device, a TV that made a new one) fails the same way.
+ */
+class TvTrust(private val pinned: X509Certificate?) {
+
+    /** The TV showed [certificate], which is not trusted. Whether to trust it is the owner's decision. */
+    class Untrusted(val certificate: X509Certificate, cause: Throwable) : IOException("the TV's certificate is not trusted", cause) {
+        val fingerprint: String get() = fingerprint(certificate)
+    }
+
+    private val recorder = Recorder(verifier())
+
+    /** The check itself, for the tests; [socketFactory] is what connections use. */
+    internal val trustManager: X509TrustManager get() = recorder
+
+    /** Sockets from this factory verify as described above. */
+    val socketFactory: SSLSocketFactory by lazy {
+        SSLContext.getInstance("TLS").apply { init(null, arrayOf<TrustManager>(recorder), null) }.socketFactory
+    }
+
+    /** Turns a failed handshake into [Untrusted] when the TV did show a certificate; anything else is passed on. */
+    fun explain(error: IOException): IOException {
+        val shown = recorder.presented
+        return if (error is SSLHandshakeException && shown != null) Untrusted(shown, error) else error
+    }
+
+    private fun verifier(): X509TrustManager {
+        val factory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
+        if (pinned != null) {
+            val store = KeyStore.getInstance(KeyStore.getDefaultType()).apply {
+                load(null, null)
+                setCertificateEntry("tv", pinned)
+            }
+            factory.init(store)
+        } else {
+            factory.init(null as KeyStore?)
+        }
+        return factory.trustManagers.filterIsInstance<X509TrustManager>().first()
+    }
+
+    /** Remembers the certificate the server showed, then lets the real verifier decide: it never accepts anything itself. */
+    private class Recorder(private val verifier: X509TrustManager) : X509TrustManager {
+        @Volatile
+        var presented: X509Certificate? = null
+
+        override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {
+            presented = chain.firstOrNull()
+            verifier.checkServerTrusted(chain, authType)
+        }
+
+        override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) = verifier.checkClientTrusted(chain, authType)
+
+        override fun getAcceptedIssuers(): Array<X509Certificate> = verifier.acceptedIssuers
+    }
+
+    companion object {
+        /** `AB:CD:...` of the certificate's SHA-256, how a certificate is shown to the owner. */
+        fun fingerprint(certificate: X509Certificate): String =
+            MessageDigest.getInstance("SHA-256").digest(certificate.encoded).joinToString(":") { "%02X".format(it) }
+
+        /** The certificate in the form it is stored in, text that fits a preference. */
+        fun encode(certificate: X509Certificate): String = Base64.getEncoder().encodeToString(certificate.encoded)
+
+        /** Reads what [encode] wrote; null for nothing stored or something unreadable. */
+        fun decode(stored: String?): X509Certificate? {
+            if (stored.isNullOrBlank()) return null
+            return try {
+                CertificateFactory.getInstance("X.509").generateCertificate(ByteArrayInputStream(Base64.getDecoder().decode(stored))) as X509Certificate
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
+}

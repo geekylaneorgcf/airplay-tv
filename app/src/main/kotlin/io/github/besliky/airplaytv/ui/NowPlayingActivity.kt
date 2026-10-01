@@ -34,6 +34,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import io.github.besliky.airplaytv.R
 import io.github.besliky.airplaytv.Settings
+import io.github.besliky.airplaytv.lg.TvSettings
 import io.github.besliky.airplaytv.service.ArtworkColors
 import io.github.besliky.airplaytv.service.DacpClient
 import io.github.besliky.airplaytv.service.ReceiverState
@@ -78,6 +79,15 @@ class NowPlayingActivity : Activity() {
     private var slideStartedAt = 0L
     private var shownCover: Bitmap? = null
     private var pausePending = false
+
+    // seeking with the left and right keys
+    private var scrubTarget = -1L // where the seek will land, while keys are pressed and until the sender has answered
+    private var scrubSentAt = 0L
+    private var scrubSentSeq = 0
+    private var lastSeekKeyAt = 0L
+    private var seekUnsupported = false
+    private var scanning = false
+    private var scanKey = 0
     private var shownPlaying = true
     private var lyricsOpen = false
     private var preview: String? = null
@@ -190,6 +200,9 @@ class NowPlayingActivity : Activity() {
         applyArtworkColors(ArtworkColors.NEUTRAL, animate = true)
     }
 
+    private val commitSeek = Runnable { sendSeek() }
+    private val seekAnswerTimeout = Runnable { seekNotAnswered() }
+
     /** The pause that was held back after a song change turned out to be real. */
     private val showPaused = Runnable {
         pausePending = false
@@ -256,6 +269,7 @@ class NowPlayingActivity : Activity() {
     }
 
     override fun onPause() {
+        stopScanning()
         foreground = false
         handler.removeCallbacks(closePeek)
         peekCloseAt = 0L
@@ -667,6 +681,8 @@ class NowPlayingActivity : Activity() {
             }
         }
 
+        checkSeekAnswer(s)
+
         if (s.volumeAtMs != lastVolumeAt) {
             lastVolumeAt = s.volumeAtMs
             if (s.volume >= 0f) onVolumeChanged(s.volume)
@@ -688,6 +704,7 @@ class NowPlayingActivity : Activity() {
         albumBefore = knownAlbum
         knownAlbum = s.album
         Log.i(MOTION, "song changed (direction $dir), album now \"${s.album}\"")
+        if (scrubTarget >= 0) endScrub()
         swapText(titleView, displayTitle(s), dir, 0)
         swapText(artistView, s.artist, dir, 50)
         swapText(albumView, s.album, dir, 100)
@@ -919,7 +936,7 @@ class NowPlayingActivity : Activity() {
 
     private fun updateProgress() {
         val s = latest
-        val position = positionNow()
+        val position = if (scrubTarget >= 0) scrubTarget else positionNow()
         if (position < 0) {
             elapsedView.text = ""
             remainingView.text = ""
@@ -1049,7 +1066,16 @@ class NowPlayingActivity : Activity() {
         if (wasDark && keyCode != KeyEvent.KEYCODE_BACK) return true // the first press only wakes the screen
         when (keyCode) {
             KeyEvent.KEYCODE_MENU -> {
-                startActivity(Intent(this, MainActivity::class.java).putExtra(MainActivity.EXTRA_STAY, true))
+                if (settings.tvMenuButton) {
+                    // the Menu button belongs to the TV's quick settings; this app's own settings are in the Apps list
+                    if (event.repeatCount == 0) TvSettings.open(this)
+                } else {
+                    startActivity(Intent(this, MainActivity::class.java).putExtra(MainActivity.EXTRA_STAY, true))
+                }
+                return true
+            }
+            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                seekKey(if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) 1 else -1, event)
                 return true
             }
             KeyEvent.KEYCODE_DPAD_DOWN -> {
@@ -1064,10 +1090,8 @@ class NowPlayingActivity : Activity() {
         val command = when (keyCode) {
             KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE,
             KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> DacpClient.PLAY_PAUSE
-            KeyEvent.KEYCODE_MEDIA_NEXT, KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
-            KeyEvent.KEYCODE_DPAD_RIGHT -> DacpClient.NEXT
-            KeyEvent.KEYCODE_MEDIA_PREVIOUS, KeyEvent.KEYCODE_MEDIA_REWIND,
-            KeyEvent.KEYCODE_DPAD_LEFT -> DacpClient.PREVIOUS
+            KeyEvent.KEYCODE_MEDIA_NEXT, KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> DacpClient.NEXT
+            KeyEvent.KEYCODE_MEDIA_PREVIOUS, KeyEvent.KEYCODE_MEDIA_REWIND -> DacpClient.PREVIOUS
             else -> null
         } ?: return super.onKeyDown(keyCode, event)
         if (event.repeatCount == 0) {
@@ -1081,6 +1105,104 @@ class NowPlayingActivity : Activity() {
             )
         }
         return true
+    }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        if (scanning && keyCode == scanKey) {
+            stopScanning()
+            return true
+        }
+        return super.onKeyUp(keyCode, event)
+    }
+
+    // ---------------------------------------------------------------- seeking
+
+    /**
+     * Left and right seek: a tap jumps ten seconds, a held key scrubs faster the longer it is held. The target
+     * moves and the bar shows it at once; the phone is only asked once the keys have been quiet for a moment.
+     * Next and previous song stay on the remote's media keys.
+     */
+    private fun seekKey(direction: Int, event: KeyEvent) {
+        val duration = latest.durationMs
+        if (duration <= 0 || latest.positionMs < 0) return // no position known, nothing to seek in
+        if (seekUnsupported) {
+            scanKeyDown(direction, event)
+            return
+        }
+        val sinceLast = if (lastSeekKeyAt == 0L) 0L else event.eventTime - lastSeekKeyAt
+        lastSeekKeyAt = event.eventTime
+        val from = if (scrubTarget >= 0) scrubTarget else positionNow()
+        val step = SeekMath.step(event.repeatCount, event.eventTime - event.downTime, sinceLast)
+        scrubTarget = SeekMath.target(from, direction, step, duration)
+        scrubSentAt = 0L
+        handler.removeCallbacks(seekAnswerTimeout)
+        handler.removeCallbacks(commitSeek)
+        handler.postDelayed(commitSeek, SeekMath.COMMIT_MS)
+        progressBar.setActive(true)
+        updateProgress()
+    }
+
+    private fun sendSeek() {
+        val target = scrubTarget
+        if (target < 0) return
+        scrubSentAt = SystemClock.elapsedRealtime()
+        scrubSentSeq = latest.progressSeq
+        Log.i(SEEK, "seek to ${target}ms from ${positionNow()}ms")
+        RemoteControl.send(DacpClient.seekTo(target)) { status -> handler.post { onSeekStatus(status) } }
+        handler.postDelayed(seekAnswerTimeout, SEEK_ANSWER_MS)
+    }
+
+    private fun onSeekStatus(status: Int) {
+        if (scrubTarget < 0 || scrubSentAt == 0L) return
+        if (status !in 200..299) {
+            Log.i(SEEK, "the sender answered $status: it does not take a seek")
+            markSeekUnsupported()
+        }
+    }
+
+    /** The sender reported a position after the seek was sent: it has answered, and either went where we asked or did not. */
+    private fun checkSeekAnswer(s: ReceiverState.Snapshot) {
+        if (scrubTarget < 0 || scrubSentAt == 0L || s.progressSeq == scrubSentSeq) return
+        Log.i(SEEK, "the sender reports ${s.positionMs}ms, aimed at ${scrubTarget}ms")
+        if (SeekMath.arrived(s.positionMs, scrubTarget)) endScrub() else markSeekUnsupported()
+    }
+
+    private fun seekNotAnswered() {
+        if (scrubTarget < 0) return
+        Log.i(SEEK, "the sender took the seek but its position did not change")
+        markSeekUnsupported()
+    }
+
+    private fun markSeekUnsupported() {
+        seekUnsupported = true
+        endScrub()
+        showHint(getString(R.string.seek_unsupported), 4000)
+    }
+
+    private fun endScrub() {
+        handler.removeCallbacks(commitSeek)
+        handler.removeCallbacks(seekAnswerTimeout)
+        scrubTarget = -1L
+        scrubSentAt = 0L
+        lastSeekKeyAt = 0L
+        progressBar.setActive(false)
+        updateProgress()
+    }
+
+    /** For a sender that takes no seek: holding the key scans like an iPod's fast forward, and letting go resumes. */
+    private fun scanKeyDown(direction: Int, event: KeyEvent) {
+        if (event.repeatCount != 1 || scanning) return
+        scanning = true
+        scanKey = event.keyCode
+        RemoteControl.send(if (direction > 0) DacpClient.BEGIN_FF else DacpClient.BEGIN_REW)
+        progressBar.setActive(true)
+    }
+
+    private fun stopScanning() {
+        if (!scanning) return
+        scanning = false
+        RemoteControl.send(DacpClient.PLAY_RESUME)
+        progressBar.setActive(false)
     }
 
     @Suppress("OVERRIDE_DEPRECATION")
@@ -1328,6 +1450,8 @@ class NowPlayingActivity : Activity() {
         const val EXTRA_PEEK = "peek"
         private const val TAG = "AirPlayTV-Presence"
         private const val MOTION = "AirPlayTV-Motion"
+        private const val SEEK = "AirPlayTV-Seek"
+        private const val SEEK_ANSWER_MS = 2500L
 
         private const val NEUTRAL_TOP = 0xFF17171A.toInt()
         private const val NEUTRAL_BOTTOM = 0xFF0B0B0D.toInt()

@@ -280,6 +280,42 @@ object Dialogs {
         )
     }
 
+    /** A dialog whose text changes while something runs in the background; its one button stops the waiting. */
+    class Progress internal constructor(private val dialog: Dialog, private val text: TextView) {
+        fun update(message: CharSequence) {
+            text.text = message
+        }
+
+        fun dismiss() {
+            if (dialog.isShowing) dialog.dismiss()
+        }
+    }
+
+    fun progress(activity: Activity, title: CharSequence, message: CharSequence, onCancel: () -> Unit): Progress {
+        val text = paragraph(activity, message)
+        val dialog = present(
+            activity,
+            title,
+            column(activity) { addView(text) },
+            listOf(Action(activity.getString(R.string.dialog_cancel), onCancel)),
+        )
+        return Progress(dialog, text)
+    }
+
+    /** A question with two answers; the focus starts on the cancelling one. */
+    fun decide(activity: Activity, title: CharSequence, message: CharSequence, confirmLabel: CharSequence, onConfirm: () -> Unit) {
+        present(
+            activity,
+            title,
+            column(activity) { addView(paragraph(activity, message)) },
+            listOf(
+                Action(activity.getString(R.string.dialog_cancel)) {},
+                Action(confirmLabel, onConfirm),
+            ),
+            focus = { it.firstOrNull() },
+        )
+    }
+
     /** Scrollable monospace text, for diagnostics and license texts. The text takes the focus so the arrow keys scroll it. */
     fun longText(activity: Activity, title: CharSequence, text: CharSequence) {
         val tv = TextView(activity).apply {

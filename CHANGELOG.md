@@ -31,6 +31,16 @@
   of an album) stays put; a cover that arrives mid-slide replaces the one sliding in; a slow cover no longer clears the
   old one after 1.5 s (now 4 s); the album fades in instead of popping in. Cover decoding and its colours moved off the
   main thread, and unchanged media metadata is no longer republished half a dozen times per skip.
+- Left and right on the remote's ring now seek instead of changing song: a tap jumps 10 seconds, holding scrubs faster the
+  longer it is held, the bar shows where it will land, and the phone is asked once the keys have been quiet for 0.4 s
+  (DACP `setproperty?dacp.playingtime`). Next and previous song stay on the media keys. If the phone's app does not honour a seek the
+  player says so once and holding the key scans like an iPod's fast forward. The log tag `AirPlayTV-Seek` records what the sender answered.
+- TV Settings Button (opt-in): the Fire remote's Menu button opens an LG TV's quick settings over the network (LG webOS remote
+  protocol: find the TV, trust the certificate it presents, accept the prompt on the TV). Certificates are verified: nothing but the
+  certificate the owner confirmed is trusted. In every app with the new Menu button service, an accessibility service that sees
+  the Menu key only; the setup shows the commands, built to keep services that are already on.
+- The Sleep After Music setup command now keeps accessibility services that are already on instead of replacing them.
+- Preview mode `skip` plays three skips the way a real session delivers them, to check the song-change animation without a phone.
 - The burn-in drift was a glide that never stopped, so the player (and the photo viewer) redrew at 60 frames per second
   for as long as they were up, using most of the stick's GPU. It now moves in short hops, and the settled backdrop no
   longer draws the gradient under its opaque dithered copy.

@@ -78,6 +78,31 @@ class Settings(context: Context) {
         get() = prefs.getBoolean(KEY_RETURN, true)
         set(value) = prefs.edit().putBoolean(KEY_RETURN, value).apply()
 
+    /** The remote's Menu button opens the quick settings of an LG TV (picture mode, sound output, ...). */
+    var tvMenuButton: Boolean
+        get() = prefs.getBoolean(KEY_TV_MENU, false)
+        set(value) = prefs.edit().putBoolean(KEY_TV_MENU, value).apply()
+
+    /** The LG TV's address on the local network; empty until found. */
+    var lgHost: String
+        get() = prefs.getString(KEY_LG_HOST, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_LG_HOST, value).apply()
+
+    /** What the TV gave this app when its owner accepted the pairing prompt; empty until paired. */
+    var lgClientKey: String
+        get() = prefs.getString(KEY_LG_KEY, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_LG_KEY, value).apply()
+
+    /** The TV's own certificate (base64), pinned after the owner confirmed it; empty until then. */
+    var lgCertificate: String
+        get() = prefs.getString(KEY_LG_CERT, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_LG_CERT, value).apply()
+
+    /** Forgets the TV: its address, the pairing key and the pinned certificate. */
+    fun forgetTv() {
+        prefs.edit().remove(KEY_LG_HOST).remove(KEY_LG_KEY).remove(KEY_LG_CERT).apply()
+    }
+
     fun registerListener(l: SharedPreferences.OnSharedPreferenceChangeListener) =
         prefs.registerOnSharedPreferenceChangeListener(l)
 
@@ -92,6 +117,10 @@ class Settings(context: Context) {
         const val KEY_LYRICS = "lyrics"
         const val KEY_SLEEP = "sleep_after_minutes"
         const val KEY_RETURN = "return_to_player"
+        const val KEY_TV_MENU = "tv_menu_button"
+        const val KEY_LG_HOST = "lg_host"
+        const val KEY_LG_KEY = "lg_client_key"
+        const val KEY_LG_CERT = "lg_certificate"
 
         /** The choices offered for Sleep After Music; 0 is off. */
         val SLEEP_CHOICES = listOf(0, 2, 5, 10, 20)

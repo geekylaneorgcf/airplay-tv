@@ -11,6 +11,8 @@ import android.os.Bundle
 import android.provider.Settings as SystemSettings
 import io.github.besliky.airplaytv.R
 import io.github.besliky.airplaytv.Settings
+import io.github.besliky.airplaytv.lg.TvSettings
+import io.github.besliky.airplaytv.service.AccessibilitySetup
 import io.github.besliky.airplaytv.service.ReceiverService
 import io.github.besliky.airplaytv.service.ReceiverState
 import io.github.besliky.airplaytv.service.ReceiverState.Status
@@ -29,6 +31,7 @@ class MainActivity : SettingsPage() {
     private lateinit var lyricsRow: Row
     private lateinit var sleepRow: Row
     private lateinit var returnRow: Row
+    private lateinit var tvMenuRow: Row
 
     private val stateListener: (ReceiverState.Snapshot) -> Unit = { render(it) }
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> bindRows() }
@@ -60,6 +63,7 @@ class MainActivity : SettingsPage() {
         lyricsRow = addRow(getString(R.string.setting_lyrics)) { toggleLyrics() }
         sleepRow = addRow(getString(R.string.setting_sleep)) { cycleSleep() }
         returnRow = addRow(getString(R.string.setting_return)) { toggleReturn() }
+        tvMenuRow = addRow(getString(R.string.setting_tv_menu)) { configureTvMenu() }
         addRow(getString(R.string.setting_advanced)) {
             startActivity(Intent(this, AdvancedActivity::class.java))
         }.navigates(true)
@@ -137,10 +141,7 @@ class MainActivity : SettingsPage() {
             this,
             getString(R.string.dialog_sleep_title),
             getString(R.string.dialog_sleep_intro),
-            listOf(
-                "adb shell settings put secure enabled_accessibility_services ${SleepService.component(packageName)}",
-                "adb shell settings put secure accessibility_enabled 1",
-            ),
+            AccessibilitySetup.commands(this, SleepService.component(packageName)),
             getString(R.string.dialog_sleep_outro),
         )
     }
@@ -152,6 +153,40 @@ class MainActivity : SettingsPage() {
             getString(R.string.dialog_overlay_intro),
             listOf("adb shell appops set $packageName SYSTEM_ALERT_WINDOW allow"),
         )
+    }
+
+    private fun tvMenuValue(): String = when (TvSettings.state(settings)) {
+        TvSettings.State.OFF -> getString(R.string.value_off)
+        TvSettings.State.NEEDS_SETUP -> getString(R.string.value_needs_setup)
+        TvSettings.State.READY -> getString(R.string.value_on)
+    }
+
+    /** Off: set the button up. Set up: try it, set it up again, use it in every app, or turn it off. */
+    private fun configureTvMenu() {
+        if (TvSettings.state(settings) != TvSettings.State.READY) {
+            TvPairing.start(this, settings) { bindRows() }
+            return
+        }
+        val items = listOf(
+            getString(R.string.tv_menu_try),
+            getString(R.string.tv_menu_every_app),
+            getString(R.string.tv_menu_pair_again),
+            getString(R.string.tv_menu_turn_off),
+        )
+        Dialogs.choose(this, R.string.tv_menu_title, items, 0) { index ->
+            when (index) {
+                0 -> TvSettings.open(this)
+                1 -> TvPairing.showEveryAppSetup(this)
+                2 -> {
+                    settings.forgetTv()
+                    TvPairing.start(this, settings) { bindRows() }
+                }
+                3 -> {
+                    settings.tvMenuButton = false
+                    bindRows()
+                }
+            }
+        }
     }
 
     private fun toggleReturn() {
@@ -201,6 +236,7 @@ class MainActivity : SettingsPage() {
         lyricsRow.value(onOff(settings.lyricsEnabled))
         sleepRow.value(sleepValue())
         returnRow.value(onOff(settings.returnToPlayer))
+        tvMenuRow.value(tvMenuValue())
         infoRow.value(onOff(settings.showConnectionInfo))
         autoOpenRow.visible(Build.VERSION.SDK_INT >= 29)
             .value(getString(if (canOpenAutomatically()) R.string.value_allowed else R.string.value_allow))
