@@ -84,6 +84,9 @@
     <string name="setting_lyrics_ytm">YouTube Music Lyrics</string>
     <string name="dialog_lyrics_ytm_title">YouTube Music Lyrics</string>
     <string name="dialog_lyrics_ytm_message">When lrclib.net has no lyrics for a song, its title and artist are also sent to YouTube Music (Google) to look for them there. They come as plain text, not in time with the song, and the lookup uses the same unofficial web interface as the YouTube Music website, so it may stop working without notice.\n\nTurn it off again here at any time.</string>
+    <string name="setting_lyrics_timing">Lyrics Timing</string>
+    <string name="value_lyrics_earlier">%1$s s earlier</string>
+    <string name="value_lyrics_later">%1$s s later</string>
     <string name="setting_sleep">Sleep After Music</string>
     <string name="setting_return">Return To Player</string>
     <string name="dialog_return_title">Return To Player</string>
@@ -121,7 +124,10 @@
     <string name="tv_pairing_done_title">TV connected</string>
     <string name="tv_pairing_done_message">Press the Menu button (the three bars next to Home) on the Fire TV remote to open the TV’s quick settings: picture mode, sound output and more. It works while the player is open. To use it in every app, switch on the Menu button service next.</string>
     <string name="tv_pairing_failed_title">TV not connected</string>
-    <string name="tv_pairing_not_found">No LG TV answered on this network. Make sure the TV is on and on the same network as this stick, then try again.</string>
+    <string name="tv_pairing_not_found">No LG TV answered on this network. Make sure the TV is on and on the same network as this stick. If it is, type its address next (the TV shows it under Settings, Network).</string>
+    <string name="tv_address_title">TV address</string>
+    <string name="tv_address_message">The address of your LG TV on this network, for example 192.168.1.50.</string>
+    <string name="tv_address_hint">192.168.1.50</string>
     <string name="tv_pairing_declined">The TV did not accept this device. Run the setup again and accept the request on the TV.</string>
     <string name="tv_pairing_unreachable">Could not reach the TV at %1$s. Is it on, and on the same network?</string>
     <string name="tv_pairing_failed">The TV did not answer as expected.</string>

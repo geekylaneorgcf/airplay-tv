@@ -52,6 +52,13 @@
 - The burn-in drift was a glide that never stopped, so the player (and the photo viewer) redrew at 60 frames per second
   for as long as they were up, using most of the stick's GPU. It now moves in short hops, and the settled backdrop no
   longer draws the gradient under its opaque dithered copy.
+- TV Settings Button: the search for the TV now also asks every address of the local network directly (some devices do not carry
+  multicast answers), holds a multicast lock while it looks, and when nothing answers it asks for the TV's address instead of
+  ending in a message.
+- Lyrics follow what is heard: the receiver compares the position the sender reports with the position of the newest audio packet
+  minus what is still queued (ring and output buffer), keeps the median of the last measurements and shifts the lyrics by it. New
+  setting Lyrics Timing (Automatic, or 0.25 s steps earlier or later up to 2 s) for songs cut differently from their lyrics. The
+  log says what was measured (`sync:` lines).
 
 ## [0.2.0] - fork
 

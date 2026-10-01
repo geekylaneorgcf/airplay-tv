@@ -239,6 +239,54 @@ object Dialogs {
         )
     }
 
+    /** Asks for one line of text under [message]; [clean] turns what was typed into the value or null (not accepted). */
+    fun editLine(
+        activity: Activity,
+        title: CharSequence,
+        message: CharSequence,
+        hint: CharSequence,
+        current: String,
+        clean: (String) -> String?,
+        onDone: (String) -> Unit,
+    ) {
+        val input = EditText(activity).apply {
+            setText(current)
+            setSelection(current.length)
+            this.hint = hint
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            imeOptions = EditorInfo.IME_ACTION_DONE
+            filters = arrayOf(InputFilter.LengthFilter(80))
+            setSingleLine()
+            setTextColor(activity.getColor(R.color.text_primary))
+            setHintTextColor(activity.getColor(R.color.text_secondary))
+            textSize = 22f
+        }
+        lateinit var dialog: Dialog
+        input.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_DONE) {
+                clean(input.text.toString())?.let(onDone)
+                dialog.dismiss()
+                true
+            } else {
+                false
+            }
+        }
+        dialog = present(
+            activity,
+            title,
+            column(activity) {
+                addView(paragraph(activity, message))
+                addView(input, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(activity, 12) })
+            },
+            listOf(
+                Action(activity.getString(R.string.dialog_cancel)) {},
+                Action(activity.getString(R.string.dialog_ok)) { clean(input.text.toString())?.let(onDone) },
+            ),
+            focus = { input },
+            softInput = true,
+        )
+    }
+
     /** Asks before something destructive; the focus starts on the safe answer. */
     fun confirm(activity: Activity, title: Int, message: Int, confirmLabel: Int, onConfirm: () -> Unit) {
         present(

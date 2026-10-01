@@ -30,6 +30,7 @@ class MainActivity : SettingsPage() {
     private lateinit var autoOpenRow: Row
     private lateinit var lyricsRow: Row
     private lateinit var ytmRow: Row
+    private lateinit var timingRow: Row
     private lateinit var sleepRow: Row
     private lateinit var returnRow: Row
     private lateinit var tvMenuRow: Row
@@ -63,6 +64,7 @@ class MainActivity : SettingsPage() {
         autoOpenRow = addRow(getString(R.string.setting_auto_open)) { requestAutoOpen() }
         lyricsRow = addRow(getString(R.string.setting_lyrics)) { toggleLyrics() }
         ytmRow = addRow(getString(R.string.setting_lyrics_ytm)) { toggleYoutubeMusicLyrics() }
+        timingRow = addRow(getString(R.string.setting_lyrics_timing)) { cycleLyricsTiming() }
         sleepRow = addRow(getString(R.string.setting_sleep)) { cycleSleep() }
         returnRow = addRow(getString(R.string.setting_return)) { toggleReturn() }
         tvMenuRow = addRow(getString(R.string.setting_tv_menu)) { configureTvMenu() }
@@ -136,6 +138,18 @@ class MainActivity : SettingsPage() {
         val next = choices[(choices.indexOf(settings.sleepAfterMinutes) + 1) % choices.size]
         settings.sleepAfterMinutes = next
         if (next > 0 && !SleepService.isEnabled) showSleepSetup()
+    }
+
+    private fun cycleLyricsTiming() {
+        val choices = Settings.LYRICS_OFFSET_CHOICES
+        settings.lyricsOffsetMs = choices[(choices.indexOf(settings.lyricsOffsetMs) + 1) % choices.size]
+    }
+
+    private fun lyricsTimingValue(): String {
+        val ms = settings.lyricsOffsetMs
+        if (ms == 0) return getString(R.string.value_automatic)
+        val seconds = Math.abs(ms) / 1000.0
+        return getString(if (ms > 0) R.string.value_lyrics_earlier else R.string.value_lyrics_later, seconds.toString())
     }
 
     private fun showSleepSetup() {
@@ -244,6 +258,7 @@ class MainActivity : SettingsPage() {
         autostartRow.value(onOff(settings.startAutomatically))
         lyricsRow.value(onOff(settings.lyricsEnabled))
         ytmRow.value(onOff(settings.lyricsYoutubeMusic)).visible(settings.lyricsEnabled)
+        timingRow.value(lyricsTimingValue()).visible(settings.lyricsEnabled)
         sleepRow.value(sleepValue())
         returnRow.value(onOff(settings.returnToPlayer))
         tvMenuRow.value(tvMenuValue())

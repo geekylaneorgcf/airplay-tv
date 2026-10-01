@@ -35,6 +35,8 @@ object ReceiverState {
         val positionAtMs: Long = 0,
         /** Counts the sender's own progress messages (not the pause and play changes, which also restamp the position). */
         val progressSeq: Int = 0,
+        /** How much later in the song the sound heard is than [positionMs] says (measured, see SyncMath); 0 until known. */
+        val syncOffsetMs: Long = 0,
         /** False between a pause and the next audio from the sender. */
         val playing: Boolean = true,
         /** The sender's volume slider position, 0..1 (AirPlay maps it to -30..0 dB), or -1 if unknown. */

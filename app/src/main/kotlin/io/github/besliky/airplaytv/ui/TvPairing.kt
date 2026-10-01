@@ -1,6 +1,8 @@
 package io.github.besliky.airplaytv.ui
 
 import android.app.Activity
+import android.content.Context
+import android.net.wifi.WifiManager
 import android.os.Handler
 import android.os.Looper
 import io.github.besliky.airplaytv.R
@@ -35,12 +37,23 @@ object TvPairing {
             onFinished()
         }
         worker.execute {
-            val host = settings.lgHost.ifEmpty { LgDiscovery.find()?.also { settings.lgHost = it } }
+            val host = settings.lgHost.ifEmpty { discover(activity)?.also { settings.lgHost = it } }
             if (cancelled.get()) return@execute
             if (host == null) {
                 main.post {
                     progress.dismiss()
-                    Dialogs.message(activity, activity.getString(R.string.tv_pairing_failed_title), activity.getString(R.string.tv_pairing_not_found))
+                    // nothing answered the search: the owner can type the address, which is all the rest needs
+                    Dialogs.editLine(
+                        activity,
+                        activity.getString(R.string.tv_address_title),
+                        activity.getString(R.string.tv_pairing_not_found) + "\n\n" + activity.getString(R.string.tv_address_message),
+                        activity.getString(R.string.tv_address_hint),
+                        "",
+                        LgDiscovery::cleanAddress,
+                    ) { typed ->
+                        settings.lgHost = typed
+                        start(activity, settings, onFinished)
+                    }
                     onFinished()
                 }
                 return@execute
@@ -53,6 +66,28 @@ object TvPairing {
             main.post {
                 progress.dismiss()
                 finish(activity, settings, host, outcome, onFinished)
+            }
+        }
+    }
+
+    /** Looks for the TV; some devices only deliver multicast answers while an app holds a multicast lock. */
+    private fun discover(activity: Activity): String? {
+        val wifi = activity.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+        val lock = try {
+            wifi?.createMulticastLock("airplaytv-lg-search")?.apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+        } catch (_: RuntimeException) {
+            null
+        }
+        try {
+            return LgDiscovery.find()
+        } finally {
+            try {
+                lock?.release()
+            } catch (_: RuntimeException) {
+                // already released
             }
         }
     }

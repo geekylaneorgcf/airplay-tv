@@ -24,6 +24,7 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "airplay.h"
 #include "audio_pipeline.h"
@@ -615,7 +616,7 @@ static jint JNICALL n_read_audio(JNIEnv *env, jclass cls, jobject buffer, jint m
 
 static void JNICALL n_stats(JNIEnv *env, jclass cls, jlongArray out) {
     (void) cls;
-    jlong v[25];
+    jlong v[27];
     v[0] = (jlong) atomic_load(&g_stats.video_frames_in);
     v[1] = (jlong) atomic_load(&g_stats.video_bytes_in);
     v[2] = (jlong) atomic_load(&g_stats.video_keyframes_in);
@@ -641,8 +642,14 @@ static void JNICALL n_stats(JNIEnv *env, jclass cls, jlongArray out) {
     v[22] = (jlong) atomic_load(&g_stats.clock_synced);
     v[23] = (jlong) atomic_load(&g_stats.sessions_started);
     v[24] = (jlong) atomic_load(&g_stats.connections_rejected);
+    v[25] = (jlong) atomic_load(&g_stats.audio_last_rtp);
+    uint64_t last_ns = atomic_load(&g_stats.audio_last_rtp_ns);
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    uint64_t now_ns = (uint64_t) now.tv_sec * 1000000000ULL + (uint64_t) now.tv_nsec;
+    v[26] = last_ns == 0 ? -1 : (jlong) ((now_ns - last_ns) / 1000000ULL); /* ms since the newest packet, -1 when none */
     jsize n = (*env)->GetArrayLength(env, out);
-    (*env)->SetLongArrayRegion(env, out, 0, n < 25 ? n : 25, v);
+    (*env)->SetLongArrayRegion(env, out, 0, n < 27 ? n : 27, v);
 }
 
 static jstring JNICALL n_log_history(JNIEnv *env, jclass cls) {

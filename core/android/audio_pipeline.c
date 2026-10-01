@@ -234,7 +234,12 @@ void ap_frame(const uint8_t *data, size_t len, uint32_t rtp_ts, uint64_t remote_
         }
         drain_aac_locked();
     }
-    (void) rtp_ts;
+    /* where in the song the newest packet is, for lining lyrics up with what is heard */
+    struct timespec arrived;
+    clock_gettime(CLOCK_MONOTONIC, &arrived);
+    atomic_store_explicit(&g_stats.audio_last_rtp, rtp_ts, memory_order_relaxed);
+    atomic_store_explicit(&g_stats.audio_last_rtp_ns, (uint64_t) arrived.tv_sec * 1000000000ULL + (uint64_t) arrived.tv_nsec,
+                          memory_order_relaxed);
     pthread_mutex_unlock(&g_ap.lock);
 }
 

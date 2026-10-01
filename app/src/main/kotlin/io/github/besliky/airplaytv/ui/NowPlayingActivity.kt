@@ -958,7 +958,7 @@ class NowPlayingActivity : Activity() {
             lyricsProgress.setFraction(fraction, false)
             lyricsElapsed.text = elapsed
             lyricsRemaining.text = remaining
-            lyricsView.setPosition(position + LYRICS_LEAD_MS)
+            lyricsView.setPosition(position + LYRICS_LEAD_MS + s.syncOffsetMs + settings.lyricsOffsetMs)
             lyricsView.setProgress(fraction)
         }
     }

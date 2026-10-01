@@ -220,6 +220,8 @@ class ReceiverService : Service(), NativeBridge.Listener {
     private var lastProgressMs = -1L
     private var lastProgressAt = 0L
     private var prevAnchorMs = -1L
+    private val syncSamples = ArrayDeque<Long>()
+    private val nativeCounters = LongArray(27)
     private var prevAnchorAt = 0L
     private var dacp: DacpClient? = null
     private var mediaSession: MediaSession? = null
@@ -641,6 +643,8 @@ class ReceiverService : Service(), NativeBridge.Listener {
 
     override fun onSessionStarted(clientName: String, clientModel: String) {
         Log.i(SESSION, "session started ($clientModel)")
+        syncSamples.clear()
+        ReceiverState.update { it.copy(syncOffsetMs = 0) }
         if (settings.speakerMode && settings.speakerTrialUntil > 0L) {
             Log.i(SESSION, "music started while appearing as a speaker: the trial is over, it stays")
             settings.speakerTrialUntil = 0L
@@ -814,7 +818,25 @@ class ReceiverService : Service(), NativeBridge.Listener {
         ReceiverState.update {
             it.copy(durationMs = durationMs, positionMs = lastProgressMs, positionAtMs = now, progressSeq = it.progressSeq + 1)
         }
+        measureSync(start, lastProgressMs, rate)
         refreshMediaSession()
+    }
+
+    /**
+     * Compares where the sender says the song is with where the sound being played is (from the newest packet's
+     * position and what is still queued), so the lyrics follow what is heard. The median of a few measurements is kept.
+     */
+    private fun measureSync(start: Long, reportedMs: Long, rate: Long) {
+        if (!NativeBridge.loaded) return
+        NativeBridge.nativeStats(nativeCounters)
+        val ringMs = nativeCounters[20]
+        val queued = ringMs + audio.bufferMs + OUTPUT_DELAY_MS
+        val offset = SyncMath.offsetMs(start, reportedMs, nativeCounters[25], nativeCounters[26], queued, rate) ?: return
+        syncSamples.addLast(offset)
+        while (syncSamples.size > SYNC_SAMPLES) syncSamples.removeFirst()
+        val median = SyncMath.median(syncSamples.toList())
+        Log.i(SESSION, "sync: the sound heard is $offset ms after the reported position (ring $ringMs ms, output ${audio.bufferMs} ms); lyrics use $median ms")
+        ReceiverState.update { it.copy(syncOffsetMs = median) }
     }
 
     override fun onPlaying(playing: Boolean) {
@@ -973,6 +995,10 @@ class ReceiverService : Service(), NativeBridge.Listener {
     companion object {
         /** Must match STARVE_MS in core/android/audio_pipeline.c: how long the audio was dry. */
         private const val PAUSE_DETECT_MS = 300L
+
+        /** Latency of the audio system beyond the output buffer, a guess that the measurement of a real song can refine. */
+        private const val OUTPUT_DELAY_MS = 60L
+        private const val SYNC_SAMPLES = 7
 
         private const val TRACK_HISTORY = 8
         private const val LYRICS_DELAY_MS = 800L

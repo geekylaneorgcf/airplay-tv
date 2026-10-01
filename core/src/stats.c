@@ -34,6 +34,8 @@ void stats_reset_session(void) {
     atomic_store(&g_stats.audio_frames_dropped, 0);
     atomic_store(&g_stats.audio_ct, 0);
     atomic_store(&g_stats.audio_buffer_ms, 0);
+    atomic_store(&g_stats.audio_last_rtp, 0);
+    atomic_store(&g_stats.audio_last_rtp_ns, 0);
     atomic_store(&g_stats.clock_offset_us, 0);
     atomic_store(&g_stats.clock_synced, 0);
 }

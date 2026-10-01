@@ -89,6 +89,8 @@ typedef struct {
     _Atomic uint64_t audio_frames_dropped;
     _Atomic int32_t audio_ct;
     _Atomic int32_t audio_buffer_ms;
+    _Atomic uint32_t audio_last_rtp;               /* RTP timestamp of the newest audio packet handed to the decoder */
+    _Atomic uint64_t audio_last_rtp_ns;            /* local monotonic time it arrived, 0 when none yet */
     _Atomic int64_t clock_offset_us;               /* sender clock minus local monotonic clock */
     _Atomic int32_t clock_synced;
     _Atomic uint64_t sessions_started;

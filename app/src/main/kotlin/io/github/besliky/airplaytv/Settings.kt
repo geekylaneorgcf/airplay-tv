@@ -33,6 +33,14 @@ class Settings(context: Context) {
         get() = prefs.getBoolean(KEY_LYRICS_YTM, false)
         set(value) = prefs.edit().putBoolean(KEY_LYRICS_YTM, value).apply()
 
+    /**
+     * Shifts the lyrics by hand, in milliseconds: positive shows each line earlier, negative later. For what the
+     * automatic alignment cannot catch (a song cut differently from its lyrics).
+     */
+    var lyricsOffsetMs: Int
+        get() = prefs.getInt(KEY_LYRICS_OFFSET, 0).let { if (it in LYRICS_OFFSET_CHOICES) it else 0 }
+        set(value) = prefs.edit().putInt(KEY_LYRICS_OFFSET, if (value in LYRICS_OFFSET_CHOICES) value else 0).apply()
+
     /** Minutes to wait after the music stops before the TV is put back to sleep; 0 = never. Only used when AirPlay woke it. */
     var sleepAfterMinutes: Int
         get() = prefs.getInt(KEY_SLEEP, 0).let { if (it in SLEEP_CHOICES) it else 0 }
@@ -134,6 +142,7 @@ class Settings(context: Context) {
         const val KEY_NAME = "device_name"
         const val KEY_LYRICS = "lyrics"
         const val KEY_LYRICS_YTM = "lyrics_youtube_music"
+        const val KEY_LYRICS_OFFSET = "lyrics_offset_ms"
         const val KEY_SPEAKER = "appear_as_speaker"
         const val KEY_SPEAKER_UNTIL = "appear_as_speaker_until"
         const val KEY_SLEEP = "sleep_after_minutes"
@@ -145,6 +154,7 @@ class Settings(context: Context) {
 
         /** The choices offered for Sleep After Music; 0 is off. */
         val SLEEP_CHOICES = listOf(0, 2, 5, 10, 20)
+        val LYRICS_OFFSET_CHOICES = (-2000..2000 step 250).toList()
         const val KEY_ENABLED = "enabled"
         const val KEY_PIN = "require_pin"
         const val KEY_AUTOSTART = "start_automatically"
