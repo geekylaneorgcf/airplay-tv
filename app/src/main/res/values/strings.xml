@@ -77,7 +77,7 @@
     <string name="setting_sleep">Sleep After Music</string>
     <string name="value_minutes">%1$d min</string>
     <string name="value_needs_setup">Needs setup</string>
-    <string name="dialog_sleep_title">Sleep after music</string>
+    <string name="dialog_sleep_title">Sleep After Music</string>
     <string name="dialog_sleep_intro">When AirPlay turns this TV on, it can turn it off again a few minutes after the music stops. Android only allows that through an accessibility service, so it needs a one-time setup from a computer. Run these two commands:</string>
     <string name="dialog_sleep_outro">If other accessibility services are already on, add this one to the colon-separated list instead. The service does not read the screen.</string>
     <string name="sleep_service_label" translatable="false">AirPlay TV sleep</string>

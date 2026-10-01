@@ -33,7 +33,7 @@ class DitherTest {
         // Plain rounding is off by up to half a level somewhere in every band; dithering keeps the local
         // average honest, which is what turns a band edge into grain.
         val w = 640
-        val h = 360
+        val h = 352 // a whole number of 16-pixel blocks
         val out = render(w, h)
         var worst = 0f
         for (by in 0 until h step 16) {
