@@ -3,6 +3,7 @@ package io.github.besliky.airplaytv.ui
 import android.animation.ArgbEvaluator
 import android.animation.ValueAnimator
 import android.app.Activity
+import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.Color
@@ -191,6 +192,18 @@ class NowPlayingActivity : Activity() {
         preview?.let { applyPreviewMode(it) }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val mode = intent.getStringExtra(EXTRA_PREVIEW) ?: return
+        preview = mode
+        PreviewMode.begin(mode)
+        lastVolumeAt = ReceiverState.current.volumeAtMs
+        setPresence(Presence.ACTIVE)
+        closeLyrics()
+        applyPreviewMode(mode)
+    }
+
     override fun onStop() {
         ReceiverState.remove(stateListener)
         handler.removeCallbacksAndMessages(null)
@@ -237,6 +250,7 @@ class NowPlayingActivity : Activity() {
 
         backdrop = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(NEUTRAL_TOP, NEUTRAL_BOTTOM))
         val root = FrameLayout(this)
+        root.clipChildren = false
         root.background = backdrop
 
         // ---- artwork: two layers so one cover can slide out while the next slides in
@@ -309,16 +323,26 @@ class NowPlayingActivity : Activity() {
 
         hintView = label(15f, SECONDARY, light).apply { alpha = 0f }
 
-        val column = LinearLayout(this).apply {
+        // The text sits at the top and the controls at the bottom of a column as tall as the cover, so a
+        // title that wraps to two lines never moves the controls.
+        val textGroup = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_VERTICAL
             addView(titleView, wide())
             addView(artistView, wide(top = 8))
             addView(albumView, wide(top = 4))
-            addView(progressRow, wide(top = 38))
+        }
+        val controlsGroup = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(progressRow, wide())
             addView(transport, wide(top = 14))
             addView(volumeRow, wide(top = 12))
             addView(hintView, wide(top = 14))
+        }
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(textGroup, wide())
+            addView(View(this@NowPlayingActivity), LinearLayout.LayoutParams(0, 0, 1f))
+            addView(controlsGroup, wide())
         }
 
         content = LinearLayout(this).apply {
@@ -326,7 +350,7 @@ class NowPlayingActivity : Activity() {
             gravity = Gravity.CENTER
             setPadding(dp(72), dp(40), dp(72), dp(40))
             addView(artHolder, LinearLayout.LayoutParams(dp(ART_DP), dp(ART_DP)))
-            addView(column, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+            addView(column, LinearLayout.LayoutParams(0, dp(ART_DP), 1f).apply {
                 marginStart = dp(60)
             })
         }
@@ -404,7 +428,10 @@ class NowPlayingActivity : Activity() {
             })
         }
 
+        content.clipChildren = false
+        content.clipToPadding = false
         stage = FrameLayout(this).apply {
+            clipChildren = false
             addView(content, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             addView(lyricsPage, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         }
@@ -435,6 +462,7 @@ class NowPlayingActivity : Activity() {
 
         // The orbit layer only ever moves and the stage only ever fades, so their animations never fight.
         orbitLayer = FrameLayout(this).apply {
+            clipChildren = false
             addView(stage, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         }
         root.addView(orbitLayer, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))

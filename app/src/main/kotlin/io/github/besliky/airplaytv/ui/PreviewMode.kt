@@ -35,7 +35,7 @@ object PreviewMode {
     )
 
     fun begin(mode: String) {
-        saved = ReceiverState.current
+        if (saved == null) saved = ReceiverState.current
         val first = tracks[0]
         val now = SystemClock.elapsedRealtime()
         val art = artwork(first.hue)
@@ -63,10 +63,15 @@ object PreviewMode {
                 lyrics = demoLyrics(),
             )
         }
+        if (mode == "volume") schedule(3000) { changeVolume(0.35f) }
         if (mode == "next" || mode == "previous") {
             val direction = if (mode == "next") 1 else -1
             schedule(6000) { changeTrack(if (direction > 0) 1 else 2, direction) }
         }
+    }
+
+    private fun changeVolume(level: Float) {
+        ReceiverState.update { it.copy(volume = level, volumeAtMs = SystemClock.elapsedRealtime()) }
     }
 
     private fun changeTrack(index: Int, direction: Int) {
