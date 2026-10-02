@@ -7,7 +7,9 @@
   player. They only do what the remote's media keys do, and only while a sender plays.
 - **Wake the TV over the network.** With the LG paired (TV Settings Button), a sender that connects while the TV is off makes the receiver
   send Wake-on-LAN (needs the TV's own setting "Turn on via Wi-Fi"), put the TV on this stick's input, and ask the phone to wait with the
-  music until the picture is up. The input and the TV's hardware address are learned at the end of pairing. Settings, TV Features.
+  music until the picture is up. The input and the TV's hardware address are learned at the end of pairing, and by themselves whenever the
+  receiver talks to the TV: the address from the TV, the input when exactly one connected input is named like a Fire TV (the TV's input list is
+  logged, so a TV that names its inputs otherwise can be told by pressing TV Features, The Stick's TV Input). Settings, TV Features.
 - **TV features:** the TV's own volume follows the phone's slider and the remote's volume keys when the TV lets it move (a TV whose sound
   goes to a fixed output keeps the receiver's own volume); Music Mode turns the TV's screen off while only music plays and back on at the next
   key; Smart Pause pauses the phone when the TV is switched to another input or off.
@@ -23,8 +25,12 @@
   (the picture dims and drifts more slowly), and a bubble with the time a seek will land on.
 - **AirPlay video** (Advanced, AirPlay Video, on by default): the cast button in apps such as Safari and YouTube gives the receiver the address
   of the video (`/play`), and a new screen plays it with the platform's player (HLS and files over https) while the phone reads where it is
-  (`/playback-info`) and sets play, pause and position (`/rate`, `/scrub`). Unverified on a phone; tested against the test sender. Addresses
+  (`/playback-info`) and sets play, pause and position (`/rate`, `/scrub`). Unverified on a phone; tried on a Fire TV Stick 4K Max against the
+  test sender and Apple's HLS sample stream (play, pause, seek, a 4:3 picture keeps its shape). Addresses
   that are not http(s) are refused; a plain http address fails because the app does not allow cleartext traffic.
+- Photos were also tried over the network on the stick with real JPEGs (4032x2268 and square): the photo fits the screen, the next one dissolves
+  in, photos sent ahead (`cacheOnly`) show on `displayCached`, an unknown key is answered 412 and a body that is no image 400, and the end of the
+  session closes the screen. Not yet seen from the real Photos app; slideshows are still refused.
 - What's new: a card after an update, from `res/raw/whats_new.txt`.
 - Debug builds install next to the release build (`.dev` suffix, named "AirPlay TV Dev"), so a build can be tried without replacing the app in use.
 - The stray `TvTrust.kt.bak` is gone from the tree.

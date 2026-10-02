@@ -21,7 +21,7 @@
 | Back to the player | Three ways, no iPhone needed. Start the app from the Home screen while music plays and it opens the player instead of the settings. While music plays and the TV is left alone, the player takes over from the system screensaver (starting already in its minimal, dim stage). And pressing play, pause, next or previous on the remote while the player is hidden shows it for six seconds, then returns to what was on screen (any key keeps it). The "Return To Player" setting turns the last two off. The remote's Menu key opens the settings from the player. |
 | Sleep after music (opt-in) | Turns the TV off again a few minutes after the music stops, only if AirPlay woke it and nobody touched the remote. Needs a one-time accessibility-service setup, see below. |
 | Photos | The receiver already advertised photo support (inherited feature bits) but refused every HTTP request. It now handles `GET /server-info`, `POST /reverse`, `PUT /photo` with the asset cache (`cacheOnly`/`displayCached`), `POST /stop`. |
-| Wake the TV | With an LG paired, a sender that connects while the TV is off makes the receiver wake it over the network (Wake-on-LAN; the TV's "Turn on via Wi-Fi" must be on), put it on this stick's input and ask the phone to wait with the music until the picture is up. |
+| Wake the TV | With an LG paired, a sender that connects while the TV is off makes the receiver wake it over the network (Wake-on-LAN; the TV's "Turn on via Wi-Fi" must be on), put it on this stick's input and ask the phone to wait with the music until the picture is up. The TV's address and the stick's input are learned by themselves when the receiver talks to the TV. |
 | TV volume, music mode, smart pause | The TV's own volume follows the phone's slider and the remote's volume keys when the TV lets it move; the TV's screen can go off while only music plays; the phone's music pauses when the TV is switched to another input. Settings, TV Features. |
 | Volume limits | A maximum, a lower maximum at night, and a start level, so a song never begins loud. Settings, Volume Limits. |
 | Sound | Bass, treble, a loudness boost and a night mode (the system's audio effects on the music's track). Settings, Sound. |
@@ -76,7 +76,7 @@ backdrop) to compare banding.
   from an iPhone by then (that confirms it). Whether iOS accepts it can only be seen on a real iPhone.
 - In-app **AirPlay video** (the cast button) is played by the receiver itself now (Advanced, AirPlay Video), but it is unverified on a
   phone, only https addresses work, and protected content (FairPlay) does not; Screen Mirroring is the way for those. Audio-only AirPlay from music apps is the main use.
-- Photos: implemented from the unofficial protocol notes and a loopback test; not yet verified against every iOS version. Slideshows are refused.
+- Photos: implemented from the unofficial protocol notes, with a loopback test and a try on a stick with real JPEGs over the network; not yet verified with the real Photos app or every iOS version. Slideshows are refused (and logged).
 - Apps that forbid screen recording (Netflix etc.) mirror black.
 
 ---
