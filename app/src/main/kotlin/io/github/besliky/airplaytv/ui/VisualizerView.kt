@@ -66,6 +66,8 @@ class VisualizerView(context: Context) : View(context) {
         val barWidth = slot * 0.46f
         val minimum = 3f * density
         for (i in 0 until BANDS) {
+            // a band with nothing in it draws nothing: a row of dots along the edge would be pixels that never change
+            if (levels[i] < 0.04f) continue
             val height = (minimum + (h - minimum) * levels[i]).coerceAtMost(h)
             val left = i * slot + (slot - barWidth) / 2f
             bar.set(left, h - height, left + barWidth, h)

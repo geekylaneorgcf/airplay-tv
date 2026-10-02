@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- a second phone while one plays -->
-    <string name="setting_takeover">When A Second Phone Plays</string>
+    <string name="setting_takeover">Second Phone</string>
     <string name="value_takeover_replace">It Takes Over</string>
     <string name="value_takeover_keep">Keep The Current One</string>
     <string name="value_takeover_ask">Ask Me</string>

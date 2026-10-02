@@ -248,6 +248,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
             else -> VolumeScale.levelToGain(VolumeLimits.apply(level, ceiling))
         }
         audio.setVolume(gain)
+        Log.i(SESSION, "volume: slider ${"%.2f".format(level)}, ceiling $ceiling%, output gain ${"%.3f".format(gain)}${if (tvVolumeInCharge) " (the TV's volume is in charge)" else ""}")
         lg.volume(level)
     }
 

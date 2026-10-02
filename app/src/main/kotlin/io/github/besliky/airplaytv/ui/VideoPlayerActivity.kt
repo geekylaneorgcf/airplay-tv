@@ -65,7 +65,10 @@ class VideoPlayerActivity : Activity(), SurfaceHolder.Callback, VideoPlayback.Co
         val surface = SurfaceView(this)
         surfaceView = surface
         surface.holder.addCallback(this)
-        root.addView(surface, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        root.addView(
+            surface,
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER),
+        )
         message = TextView(this).apply {
             setTextColor(0xCCFFFFFF.toInt())
             textSize = 22f
@@ -125,6 +128,7 @@ class VideoPlayerActivity : Activity(), SurfaceHolder.Callback, VideoPlayback.Co
             )
             created.setDisplay(holder)
             created.setOnPreparedListener { prepare(it) }
+            created.setOnVideoSizeChangedListener { _, width, height -> fit(width, height) }
             created.setOnCompletionListener {
                 Log.i(VIDEO, "video: the stream ended")
                 rate = 0.0
@@ -142,6 +146,19 @@ class VideoPlayerActivity : Activity(), SurfaceHolder.Callback, VideoPlayback.Co
         }
         handler.removeCallbacks(report)
         handler.post(report)
+    }
+
+    /** Fits the picture into the screen with its own proportions (bars at the sides or the top and bottom), not stretched to the screen's. */
+    private fun fit(videoWidth: Int, videoHeight: Int) {
+        if (videoWidth <= 0 || videoHeight <= 0) return
+        val root = surfaceView.parent as? FrameLayout ?: return
+        val screenWidth = root.width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
+        val screenHeight = root.height.takeIf { it > 0 } ?: resources.displayMetrics.heightPixels
+        val scale = minOf(screenWidth.toFloat() / videoWidth, screenHeight.toFloat() / videoHeight)
+        val params = surfaceView.layoutParams
+        params.width = (videoWidth * scale).toInt()
+        params.height = (videoHeight * scale).toInt()
+        surfaceView.layoutParams = params
     }
 
     private fun prepare(mp: MediaPlayer) {
