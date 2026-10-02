@@ -131,6 +131,33 @@ class LgSessionTest {
     }
 
     @Test
+    fun `the input list names the HDMI inputs, and the one named like an Amazon stick is this stick's`() {
+        val message = JSONObject(
+            """{"payload":{"devices":[
+                {"id":"HDMI_1","label":"Fire TV","port":1,"connected":true,"appId":"com.webos.app.hdmi1"},
+                {"id":"HDMI_2","label":"PlayStation 5","port":2,"connected":true,"appId":"com.webos.app.hdmi2"},
+                {"id":"HDMI_3","label":"HDMI 3","port":3,"connected":false,"appId":"com.webos.app.hdmi3"},
+                {"id":"AV_1","label":"Amazon AV","connected":true,"appId":"com.webos.app.externalinput.av1"}
+            ],"returnValue":true}}""",
+        )
+        val inputs = LgFacts.inputs(message)
+        assertEquals(listOf("com.webos.app.hdmi1", "com.webos.app.hdmi2", "com.webos.app.hdmi3"), inputs.map { it.appId })
+        assertEquals(LgFacts.Input("com.webos.app.hdmi2", "PlayStation 5", true), inputs[1])
+        assertFalse(inputs[2].connected)
+        assertEquals("com.webos.app.hdmi1", LgFacts.stickInput(inputs))
+        assertEquals(emptyList<LgFacts.Input>(), LgFacts.inputs(JSONObject("""{"payload":{}}""")))
+    }
+
+    @Test
+    fun `no input is guessed when none or several are named like a stick, or when the stick is not connected`() {
+        fun input(app: String, label: String, connected: Boolean = true) = LgFacts.Input("com.webos.app.$app", label, connected)
+        assertNull(LgFacts.stickInput(listOf(input("hdmi1", "HDMI 1"), input("hdmi2", "PlayStation 5"))))
+        assertNull(LgFacts.stickInput(listOf(input("hdmi1", "Fire TV"), input("hdmi3", "Amazon Fire TV Cube"))))
+        assertNull(LgFacts.stickInput(listOf(input("hdmi1", "Fire TV", connected = false), input("hdmi2", "PlayStation 5"))))
+        assertEquals("com.webos.app.hdmi3", LgFacts.stickInput(listOf(input("hdmi2", "PlayStation 5"), input("hdmi3", "FireTV Stick 4K Max"))))
+    }
+
+    @Test
     fun `hardware addresses come from the wired and the wireless info`() {
         val message = JSONObject(
             """{"payload":{"wiredInfo":{"macAddress":"3C:CD:93:1A:2B:4C"},"wifiInfo":{"macAddress":"3c:cd:93:1a:2b:4d"},"returnValue":true}}""",

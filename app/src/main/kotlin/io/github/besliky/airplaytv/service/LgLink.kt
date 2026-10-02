@@ -9,6 +9,7 @@ import io.github.besliky.airplaytv.Settings
 import io.github.besliky.airplaytv.lg.ArpTable
 import io.github.besliky.airplaytv.lg.LgFacts
 import io.github.besliky.airplaytv.lg.LgSession
+import io.github.besliky.airplaytv.lg.LgSetup
 import io.github.besliky.airplaytv.lg.LgTv
 import io.github.besliky.airplaytv.lg.TvSettings
 import io.github.besliky.airplaytv.lg.Wol
@@ -181,6 +182,11 @@ class LgLink(private val context: Context, private val settings: Settings) {
                     }
                 }
                 Log.i(SERVICE, "LG connected to the TV")
+                try {
+                    LgSetup.learnQuietly(opened, settings)
+                } catch (e: Exception) {
+                    Log.w(SERVICE, "LG could not learn about the TV", e)
+                }
                 opened
             }
             is LgTv.SessionResult.Stopped -> {

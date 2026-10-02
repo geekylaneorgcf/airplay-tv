@@ -154,6 +154,31 @@ object LgFacts {
         )
     }
 
+    /** One entry of `ssap://tv/getExternalInputList`: [appId] is the app of the input (`com.webos.app.hdmi1`), [label] the name the TV shows for it. */
+    data class Input(val appId: String, val label: String, val connected: Boolean)
+
+    /** The HDMI inputs in an answer of `ssap://tv/getExternalInputList`. */
+    fun inputs(message: JSONObject): List<Input> {
+        val devices = message.optJSONObject("payload")?.optJSONArray("devices") ?: return emptyList()
+        val found = ArrayList<Input>()
+        for (i in 0 until devices.length()) {
+            val device = devices.optJSONObject(i) ?: continue
+            val appId = device.optString("appId")
+            if (inputIdOf(appId) == null) continue
+            found.add(Input(appId, device.optString("label"), device.optBoolean("connected", false)))
+        }
+        return found
+    }
+
+    /**
+     * The app of the one connected input that the TV names like an Amazon stick ("Fire TV", "Amazon Fire TV Stick": an input is named
+     * after the device that reports its name), or null when no input or more than one is.
+     */
+    fun stickInput(inputs: List<Input>): String? =
+        inputs.filter { it.connected && STICK_NAME.containsMatchIn(it.label) }.map { it.appId }.distinct().singleOrNull()
+
+    private val STICK_NAME = Regex("fire|amazon", RegexOption.IGNORE_CASE)
+
     /** The hardware addresses in an answer of `ssap://com.webos.service.connectionmanager/getinfo` (the wired and the wireless one). */
     fun macAddresses(message: JSONObject): List<String> {
         val payload = message.optJSONObject("payload") ?: return emptyList()
