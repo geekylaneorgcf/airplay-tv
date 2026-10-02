@@ -24,6 +24,7 @@ import android.os.PowerManager
 import android.provider.Settings.canDrawOverlays
 import android.view.Display
 import android.view.KeyEvent
+import android.widget.Toast
 import io.github.besliky.airplaytv.App
 import io.github.besliky.airplaytv.BuildConfig
 import io.github.besliky.airplaytv.Identity
@@ -40,6 +41,8 @@ import io.github.besliky.airplaytv.service.ReceiverState.Status
 import io.github.besliky.airplaytv.ui.MirrorActivity
 import io.github.besliky.airplaytv.ui.NowPlayingActivity
 import io.github.besliky.airplaytv.ui.PhotoActivity
+import io.github.besliky.airplaytv.ui.TakeoverActivity
+import java.util.Calendar
 import java.util.concurrent.Executors
 import java.util.zip.CRC32
 
@@ -86,6 +89,18 @@ class ReceiverService : Service(), NativeBridge.Listener {
 
     /** Tells the home screen app when something starts or stops playing (see [LauncherLink]). */
     private val launcherListener: (ReceiverState.Snapshot) -> Unit = { LauncherLink.onState(this, it) }
+
+    private lateinit var lg: LgLink
+    private lateinit var effects: SoundEffects
+
+    /** True while the TV's own volume is moved with the slider: the receiver's output is then at full scale. */
+    private var tvVolumeInCharge = false
+
+    /** The first volume the phone reports in a session is capped by the start level. */
+    private var firstVolumeOfSession = true
+    private var unpublishedChecks = 0
+    private var lastHeal = 0L
+    private val healthExecutor = Executors.newSingleThreadExecutor { task -> Thread(task, "health").apply { isDaemon = true } }
 
     /**
      * Fire OS handles the remote's volume and mute keys itself and never lets an app see them, but
@@ -212,8 +227,32 @@ class ReceiverService : Service(), NativeBridge.Listener {
 
     /** The remote changed the volume: apply it for real and show it. The phone's next change replaces it. */
     private fun setVolumeLevel(level: Float) {
-        audio.setVolume(VolumeScale.levelToGain(level))
+        applyOutput(level)
         ReceiverState.update { it.copy(volume = level, volumeAtMs = SystemClock.elapsedRealtime()) }
+    }
+
+    private fun ceilingNow(): Int =
+        VolumeLimits.ceilingPercent(settings.volumeLimits(), Calendar.getInstance().get(Calendar.HOUR_OF_DAY))
+
+    /**
+     * Puts the slider position [level] on the speakers: scaled into the ceiling of the volume limits, and either as the receiver's own
+     * gain or, while the TV's volume is in charge, as the TV's volume with the receiver's output at full scale.
+     */
+    private fun applyOutput(level: Float, phoneGain: Float? = null) {
+        val ceiling = ceilingNow()
+        val gain = when {
+            tvVolumeInCharge -> 1f
+            // with no ceiling the phone's own gain is used as it is, down to the faint steps under the slider's range
+            ceiling >= 100 && phoneGain != null -> phoneGain
+            else -> VolumeScale.levelToGain(VolumeLimits.apply(level, ceiling))
+        }
+        audio.setVolume(gain)
+        lg.volume(level)
+    }
+
+    /** The limits or who is in charge of the volume changed: the same slider position, put on the speakers again. */
+    private fun reapplyVolume() {
+        if (ReceiverState.current.status == Status.CONNECTED) applyOutput(currentVolume())
     }
 
     // ---- lyrics (only when the user turned them on) ----
@@ -313,6 +352,18 @@ class ReceiverService : Service(), NativeBridge.Listener {
             onPublished = { name -> ReceiverState.update { it.copy(publishedName = name) } }
         }
         audio = AudioOutput(this)
+        effects = SoundEffects(settings)
+        audio.onTrack = { sessionId -> effects.attach(sessionId) }
+        audio.onStopped = { effects.release() }
+        lg = LgLink(this, settings).also { link ->
+            link.onTvVolumeInCharge = { inCharge ->
+                handler.post {
+                    tvVolumeInCharge = inCharge
+                    reapplyVolume()
+                }
+            }
+        }
+        UserKeys.listener = { lg.userKey() }
         dacp = DacpClient(this).also { RemoteControl.client = it }
         network = NetworkMonitor(this, ::onNetworkChanged)
         network.start()
@@ -355,6 +406,10 @@ class ReceiverService : Service(), NativeBridge.Listener {
         }
         if (NativeBridge.listener === this) NativeBridge.listener = null
         stopVolumeWatch()
+        UserKeys.listener = null
+        lg.shutdown()
+        effects.release()
+        healthExecutor.shutdownNow()
         photoExecutor.shutdownNow()
         coverExecutor.shutdownNow()
         releaseMediaSession()
@@ -425,10 +480,57 @@ class ReceiverService : Service(), NativeBridge.Listener {
         }
         running = true
         NativeBridge.nativeSetPairedClients(paired.keys())
+        NativeBridge.nativeSetTakeover(takeoverPolicy())
         acquireMulticastLock()
         publish()
         updateIdleState()
         checkSpeakerTrial()
+        handler.removeCallbacks(healthTick)
+        handler.postDelayed(healthTick, HEALTH_MS)
+    }
+
+    private fun takeoverPolicy(): Int = if (settings.takeover == Settings.TAKEOVER_REPLACE) 0 else 1
+
+    // ---- self-check: a receiver that has gone quiet is brought back
+
+    private val healthTick = object : Runnable {
+        override fun run() {
+            checkHealth()
+            handler.postDelayed(this, HEALTH_MS)
+        }
+    }
+
+    /**
+     * Fire OS closes background apps on a stick with 1.7 GB, and Wi-Fi blinks. Once a minute, while nobody plays, the receiver checks
+     * that something answers on its port and that its name is still announced, and mends what is not: it restarts when the port is
+     * silent, and announces the name again when that was lost for two checks in a row.
+     */
+    private fun checkHealth() {
+        if (!running || ReceiverState.current.clientName != null || !network.current.available) return
+        val checkedPort = port
+        healthExecutor.execute {
+            val open = SelfCheck.portOpen(checkedPort)
+            handler.post {
+                if (!running || ReceiverState.current.clientName != null) return@post
+                if (!open) {
+                    val now = SystemClock.elapsedRealtime()
+                    if (now - lastHeal > HEAL_MIN_GAP_MS) {
+                        lastHeal = now
+                        Log.w(SERVICE, "nothing answers on the receiver's port: restarting it")
+                        restartReceiver()
+                    }
+                    return@post
+                }
+                if (advertiser.isPublished) {
+                    unpublishedChecks = 0
+                } else if (++unpublishedChecks >= 2) {
+                    unpublishedChecks = 0
+                    Log.w(SERVICE, "the name is no longer announced: announcing it again")
+                    publish()
+                    advertiser.refresh()
+                }
+            }
+        }
     }
 
     /**
@@ -452,6 +554,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
     }
 
     private fun stopReceiver() {
+        handler.removeCallbacks(healthTick)
         if (!running) return
         running = false
         advertiser.withdraw()
@@ -571,6 +674,9 @@ class ReceiverService : Service(), NativeBridge.Listener {
                     ReceiverState.update { it.copy(lyricsState = LyricsState.OFF, lyrics = null) }
                 }
             }
+            Settings.KEY_BASS, Settings.KEY_TREBLE, Settings.KEY_LOUDNESS, Settings.KEY_NIGHT_MODE -> effects.apply()
+            Settings.KEY_TAKEOVER -> if (running && NativeBridge.loaded) NativeBridge.nativeSetTakeover(takeoverPolicy())
+            Settings.KEY_VOLUME_MAX, Settings.KEY_VOLUME_NIGHT, Settings.KEY_NIGHT_FROM, Settings.KEY_NIGHT_TO, Settings.KEY_TV_VOLUME -> reapplyVolume()
             in Settings.RESTART_KEYS -> {
                 if (ReceiverState.current.clientName != null) {
                     restartPending = true
@@ -710,6 +816,8 @@ class ReceiverService : Service(), NativeBridge.Listener {
         wakeDisplay()
         acquireSessionLocks()
         startVolumeWatch()
+        lg.sessionStarted()
+        firstVolumeOfSession = true
         phoneGain = -1f
         trackKey = ""
         trackHistory.clear()
@@ -726,6 +834,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
         Log.i(SESSION, "session ended")
         audio.stop()
         stopVolumeWatch()
+        lg.sessionEnded()
         releaseSessionLocks()
         Notifications.cancelSessionPrompt(this)
         ReceiverState.update {
@@ -763,7 +872,26 @@ class ReceiverService : Service(), NativeBridge.Listener {
 
     override fun onVideoStarted() {
         ReceiverState.update { it.copy(videoActive = true) }
+        lg.videoStarted()
         showPlayback()
+    }
+
+    /** A second phone was turned away because the first is kept: say so, or, when the owner wants to be asked, ask. */
+    override fun onSessionBlocked(clientName: String) {
+        val current = ReceiverState.current.clientName ?: getString(R.string.takeover_somebody)
+        if (settings.takeover == Settings.TAKEOVER_ASK) {
+            try {
+                startActivity(
+                    Intent(this, TakeoverActivity::class.java)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                        .putExtra(TakeoverActivity.EXTRA_NAME, clientName),
+                )
+            } catch (e: RuntimeException) {
+                Log.w(SESSION, "cannot ask whether $clientName may play", e)
+            }
+        } else {
+            Toast.makeText(this, getString(R.string.takeover_blocked, clientName, current), Toast.LENGTH_LONG).show()
+        }
     }
 
     override fun onVideoStopped() {
@@ -780,6 +908,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
         if (sampleRate > 0) audioSampleRate = sampleRate
         ReceiverState.update { it.copy(audioActive = true) }
         startMediaSession()
+        lg.audioStarted()
         showNowPlaying()
     }
 
@@ -795,8 +924,19 @@ class ReceiverService : Service(), NativeBridge.Listener {
         val repeated = phoneGain >= 0f && VolumeScale.sameGain(gain, phoneGain)
         phoneGain = gain
         if (repeated) return
-        audio.setVolume(gain)
-        ReceiverState.update { it.copy(volume = VolumeScale.gainToLevel(gain), volumeAtMs = SystemClock.elapsedRealtime()) }
+        var level = VolumeScale.gainToLevel(gain)
+        var exactGain: Float? = gain
+        if (firstVolumeOfSession) {
+            // a song does not start louder than the owner chose, whatever the phone's slider says
+            firstVolumeOfSession = false
+            val started = VolumeLimits.startLevel(level, settings.volumeLimits())
+            if (started != level) {
+                level = started
+                exactGain = null
+            }
+        }
+        applyOutput(level, exactGain)
+        ReceiverState.update { it.copy(volume = level, volumeAtMs = SystemClock.elapsedRealtime()) }
     }
 
     override fun onTrackInfo(title: String, artist: String, album: String) {
@@ -1059,6 +1199,9 @@ class ReceiverService : Service(), NativeBridge.Listener {
         private const val TRACK_HISTORY = 8
         private const val LYRICS_DELAY_MS = 800L
         private val LYRICS_RETRY_MS = longArrayOf(4_000, 12_000, 30_000)
+
+        private const val HEALTH_MS = 60_000L
+        private const val HEAL_MIN_GAP_MS = 2 * 60_000L
 
         private const val VOLUME_WATCH_MS = 150L
         private const val STREAM_CENTER = 8

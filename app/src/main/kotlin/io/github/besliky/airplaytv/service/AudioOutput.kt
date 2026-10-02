@@ -36,6 +36,15 @@ class AudioOutput(context: Context) {
     var bufferMs: Int = 0
         private set
 
+    @Volatile
+    private var channelCount = 2
+
+    /** Called (on the thread that started the output) with the audio session of a new track, so effects can be put on it. */
+    var onTrack: ((Int) -> Unit)? = null
+
+    /** Called when the track is let go. */
+    var onStopped: (() -> Unit)? = null
+
     val active: Boolean get() = running
 
     fun start(sampleRate: Int, channels: Int, lowLatency: Boolean) {
@@ -80,7 +89,13 @@ class AudioOutput(context: Context) {
         }
         t.setVolume(gain)
         bufferMs = t.bufferSizeInFrames * 1000 / sampleRate
+        channelCount = if (channels == 1) 1 else 2
         track = t
+        try {
+            onTrack?.invoke(t.audioSessionId)
+        } catch (e: RuntimeException) {
+            Log.w(AUDIO, "cannot put effects on the track", e)
+        }
         requestFocus(attributes)
         running = true
         thread = Thread({ writerLoop(t) }, "AirPlayAudioOut").apply { start() }
@@ -101,6 +116,7 @@ class AudioOutput(context: Context) {
                     t.play()
                     playing = true
                 }
+                AudioTap.tap.write(buffer, n, channelCount)
                 buffer.limit(n)
                 while (running && buffer.hasRemaining()) {
                     val written = t.write(buffer, buffer.remaining(), AudioTrack.WRITE_BLOCKING)
@@ -132,6 +148,7 @@ class AudioOutput(context: Context) {
             it.join(1000)
         }
         thread = null
+        if (track != null) onStopped?.invoke()
         track?.release()
         track = null
         abandonFocus()

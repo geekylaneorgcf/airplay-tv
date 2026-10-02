@@ -124,6 +124,7 @@ struct airplay_server {
     _Atomic bool running;
     _Atomic bool disconnect_requested;
     _Atomic bool session_active;
+    _Atomic int takeover;     /* AIRPLAY_TAKEOVER_* */
 
     conn_t *conns[MAX_CONNECTIONS];
     session_t *active;
@@ -984,7 +985,16 @@ static bool setup_session(airplay_server_t *s, conn_t *c, const rtsp_request_t *
         secure_zero(shared, sizeof(shared));
     }
 
-    /* One sender at a time: a new sender replaces the current one. */
+    /* One sender at a time: a new sender replaces the current one, unless the owner chose to keep the one that plays. */
+    if (s->active && s->active->owner != c && atomic_load(&s->takeover) == AIRPLAY_TAKEOVER_KEEP) {
+        const char *newcomer = bp_get_string(bp_dict_get(root, "name"));
+        LOG_I(SESSION, "a second sender is turned away: the current session is kept");
+        if (s->ev.session_blocked) {
+            s->ev.session_blocked(s->ev.ctx, newcomer && newcomer[0] ? newcomer : "iPhone");
+        }
+        secure_zero(key, sizeof(key));
+        return false;
+    }
     if (s->active && s->active->owner != c) {
         conn_t *old = s->active->owner;
         LOG_I(SESSION, "new sender replaces the current session");
@@ -1793,6 +1803,12 @@ void airplay_server_destroy(airplay_server_t *s) {
     pthread_mutex_destroy(&s->paired_lock);
     secure_zero(&s->identity, sizeof(s->identity));
     free(s);
+}
+
+void airplay_server_set_takeover(airplay_server_t *s, int policy) {
+    if (s) {
+        atomic_store(&s->takeover, policy == AIRPLAY_TAKEOVER_KEEP ? AIRPLAY_TAKEOVER_KEEP : AIRPLAY_TAKEOVER_REPLACE);
+    }
 }
 
 void airplay_server_disconnect(airplay_server_t *s) {

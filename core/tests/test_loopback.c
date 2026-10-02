@@ -71,6 +71,8 @@ typedef struct {
     char active_remote[64];
     int photos;
     int photo_stops;
+    int blocked;
+    char blocked_name[64];
     char photo_key[64];
     size_t photo_len;
     uint8_t photo_first;
@@ -237,6 +239,14 @@ static void ev_photo_stop(void *ctx) {
     pthread_mutex_unlock(&g_cap.lock);
 }
 
+static void ev_blocked(void *ctx, const char *name) {
+    (void) ctx;
+    pthread_mutex_lock(&g_cap.lock);
+    str_copy(g_cap.blocked_name, sizeof(g_cap.blocked_name), name);
+    g_cap.blocked++;
+    pthread_mutex_unlock(&g_cap.lock);
+}
+
 static void ev_remote(void *ctx, const char *dacp_id, const char *active_remote) {
     (void) ctx;
     pthread_mutex_lock(&g_cap.lock);
@@ -280,7 +290,7 @@ static airplay_server_t *start_server(bool require_pin, int *port) {
     airplay_events_t ev = {
         .session_started = ev_started, .session_ended = ev_ended, .pin_display = ev_pin, .client_paired = ev_paired,
         .track_info = ev_track_info, .artwork = ev_artwork, .progress = ev_progress, .remote = ev_remote,
-        .photo = ev_photo, .photo_stop = ev_photo_stop,
+        .photo = ev_photo, .photo_stop = ev_photo_stop, .session_blocked = ev_blocked,
     };
     airplay_server_t *s = airplay_server_create(&cfg, &ev, &kOps, NULL);
     if (!s) return NULL;
@@ -404,6 +414,46 @@ TEST(loopback_full_session_with_legacy_pairing) {
     CHECK(wait_for(&g_cap.audio_stops, 1));
     CHECK(!airplay_server_session_active(s));
     fs_close(&f);
+    airplay_server_destroy(s);
+}
+
+TEST(loopback_a_second_sender_is_turned_away_when_the_current_session_is_kept) {
+    int port = 0;
+    airplay_server_t *s = start_server(false, &port);
+    CHECK(s != NULL);
+    fake_sender_t a;
+    CHECK(fs_connect(&a, "127.0.0.1", (uint16_t) port) == 0);
+    CHECK(fs_pair(&a) == 0);
+    CHECK(fs_fairplay(&a) == 0);
+    CHECK_EQ(fs_setup_session(&a, "Phone A", "iPhone15,2"), 200);
+    CHECK(wait_for(&g_cap.sessions_started, 1));
+
+    /* the default: a newcomer replaces the sender that plays (covered by the other tests), here the owner chose to keep it */
+    airplay_server_set_takeover(s, AIRPLAY_TAKEOVER_KEEP);
+    fake_sender_t b;
+    CHECK(fs_connect(&b, "127.0.0.1", (uint16_t) port) == 0);
+    CHECK(fs_pair(&b) == 0);
+    CHECK(fs_fairplay(&b) == 0);
+    CHECK_EQ(fs_setup_session(&b, "Phone B", "iPhone15,2"), 403);
+    CHECK(wait_for(&g_cap.blocked, 1));
+    CHECK_STR(g_cap.blocked_name, "Phone B");
+    CHECK(airplay_server_session_active(s));
+    CHECK_EQ(g_cap.sessions_started, 1);
+    CHECK_EQ(g_cap.sessions_ended, 0);
+    fs_close(&b);
+
+    /* and back to the default: now a newcomer takes over */
+    airplay_server_set_takeover(s, AIRPLAY_TAKEOVER_REPLACE);
+    fake_sender_t c;
+    CHECK(fs_connect(&c, "127.0.0.1", (uint16_t) port) == 0);
+    CHECK(fs_pair(&c) == 0);
+    CHECK(fs_fairplay(&c) == 0);
+    CHECK_EQ(fs_setup_session(&c, "Phone C", "iPhone15,2"), 200);
+    CHECK(wait_for(&g_cap.sessions_started, 2));
+    CHECK_STR(g_cap.client_name, "Phone C");
+    CHECK_EQ(g_cap.blocked, 1);
+    fs_close(&c);
+    fs_close(&a);
     airplay_server_destroy(s);
 }
 

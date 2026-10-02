@@ -8,6 +8,7 @@ import android.os.Looper
 import io.github.besliky.airplaytv.R
 import io.github.besliky.airplaytv.Settings
 import io.github.besliky.airplaytv.lg.LgDiscovery
+import io.github.besliky.airplaytv.lg.LgSetup
 import io.github.besliky.airplaytv.lg.LgTv
 import io.github.besliky.airplaytv.lg.TvSettings
 import io.github.besliky.airplaytv.lg.TvTrust
@@ -98,6 +99,8 @@ object TvPairing {
                 settings.lgHost = host
                 settings.lgClientKey = outcome.clientKey
                 settings.tvMenuButton = true
+                // the owner is looking at this stick's picture right now: which input of the TV that is, and its hardware address, are worth keeping
+                worker.execute { LgSetup.learn(settings) }
                 onFinished()
                 Dialogs.message(activity, activity.getString(R.string.tv_pairing_done_title), activity.getString(R.string.tv_pairing_done_message))
             }

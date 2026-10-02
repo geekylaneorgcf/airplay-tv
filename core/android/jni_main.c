@@ -58,6 +58,7 @@ static struct {
     jmethodID remote;
     jmethodID photo;
     jmethodID photo_stop;
+    jmethodID session_blocked;
 } g_cb;
 
 static pthread_mutex_t g_server_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -183,6 +184,18 @@ static void ev_session_started(void *ctx, const char *name, const char *model) {
     check_exception(env);
     (*env)->DeleteLocalRef(env, n);
     (*env)->DeleteLocalRef(env, m);
+}
+
+static void ev_session_blocked(void *ctx, const char *name) {
+    (void) ctx;
+    JNIEnv *env = get_env();
+    if (!env) {
+        return;
+    }
+    jbyteArray n = utf8_bytes(env, name);
+    (*env)->CallStaticVoidMethod(env, g_bridge, g_cb.session_blocked, n);
+    check_exception(env);
+    (*env)->DeleteLocalRef(env, n);
 }
 
 static void ev_session_ended(void *ctx) {
@@ -468,6 +481,7 @@ static jint JNICALL n_start(JNIEnv *env, jclass cls, jbyteArray name, jbyteArray
         .remote = ev_remote,
         .photo = ev_photo,
         .photo_stop = ev_photo_stop,
+        .session_blocked = ev_session_blocked,
     };
 
     pthread_mutex_lock(&g_server_lock);
@@ -680,6 +694,14 @@ static jboolean JNICALL n_session_active(JNIEnv *env, jclass cls) {
     return (jboolean) active;
 }
 
+static void JNICALL n_set_takeover(JNIEnv *env, jclass cls, jint policy) {
+    (void) env;
+    (void) cls;
+    pthread_mutex_lock(&g_server_lock);
+    airplay_server_set_takeover(g_server, (int) policy);
+    pthread_mutex_unlock(&g_server_lock);
+}
+
 static const JNINativeMethod kMethods[] = {
     { "nativeSetLogLevel", "(I)V", (void *) n_set_log_level },
     { "nativeLog", "(IILjava/lang/String;)V", (void *) n_log },
@@ -695,6 +717,7 @@ static const JNINativeMethod kMethods[] = {
     { "nativeStats", "([J)V", (void *) n_stats },
     { "nativeLogHistory", "()Ljava/lang/String;", (void *) n_log_history },
     { "nativeSessionActive", "()Z", (void *) n_session_active },
+    { "nativeSetTakeover", "(I)V", (void *) n_set_takeover },
 };
 
 JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *reserved) {
@@ -733,6 +756,7 @@ JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *reserved) {
     g_cb.remote = (*env)->GetStaticMethodID(env, g_bridge, "onRemote", "([B[B)V");
     g_cb.photo = (*env)->GetStaticMethodID(env, g_bridge, "onPhoto", "([B[B)V");
     g_cb.photo_stop = (*env)->GetStaticMethodID(env, g_bridge, "onPhotoStop", "()V");
+    g_cb.session_blocked = (*env)->GetStaticMethodID(env, g_bridge, "onSessionBlocked", "([B)V");
     if ((*env)->ExceptionCheck(env)) {
         (*env)->ExceptionClear(env);
         return JNI_ERR;

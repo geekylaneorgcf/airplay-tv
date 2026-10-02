@@ -38,6 +38,7 @@ import io.github.besliky.airplaytv.R
 import io.github.besliky.airplaytv.Settings
 import io.github.besliky.airplaytv.lg.TvMenuMode
 import io.github.besliky.airplaytv.service.ArtworkColors
+import io.github.besliky.airplaytv.service.AudioTap
 import io.github.besliky.airplaytv.service.DacpClient
 import io.github.besliky.airplaytv.service.ReceiverState
 import io.github.besliky.airplaytv.service.RemoteControl
@@ -62,7 +63,7 @@ import kotlin.math.sin
  */
 class NowPlayingActivity : Activity() {
 
-    private enum class Presence { ACTIVE, DIM, MINIMAL, BLACK, BLANK, GOODNIGHT }
+    private enum class Presence { ACTIVE, REST, DIM, MINIMAL, BLACK, BLANK, GOODNIGHT }
 
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var settings: Settings
@@ -156,6 +157,8 @@ class NowPlayingActivity : Activity() {
     private lateinit var aodRemaining: TextView
     private lateinit var aodBar: PillBar
     private lateinit var goodnightView: TextView
+    private lateinit var visualizer: VisualizerView
+    private lateinit var scrubBubble: TextView
 
     // ---- colours ----
     private var shownTop = NEUTRAL_TOP
@@ -173,6 +176,29 @@ class NowPlayingActivity : Activity() {
         }
     }
 
+    /** Moves the visualizer's bars to the music, a few times a second, while it is in view and the music plays. */
+    private val visualTick = object : Runnable {
+        override fun run() {
+            val show = settings.visualizer && presence == Presence.ACTIVE && latest.playing && !lyricsOpen && foreground && shot == null
+            AudioTap.tap.enabled = settings.visualizer && foreground
+            if (show) {
+                visualizer.step()
+                if (visualizer.alpha < 1f && !visualizerFading) {
+                    visualizerFading = true
+                    visualizer.animate().alpha(1f).setDuration(600).withEndAction { visualizerFading = false }.start()
+                }
+            } else {
+                visualizer.rest()
+                if (visualizer.alpha > 0f && !visualizerFading && presence != Presence.ACTIVE) {
+                    visualizerFading = true
+                    visualizer.animate().alpha(0f).setDuration(900).withEndAction { visualizerFading = false }.start()
+                }
+            }
+            handler.postDelayed(this, VISUAL_MS)
+        }
+    }
+    private var visualizerFading = false
+
     private val presenceTick = object : Runnable {
         override fun run() {
             evaluatePresence()
@@ -183,7 +209,7 @@ class NowPlayingActivity : Activity() {
     private val orbitTick = object : Runnable {
         override fun run() {
             orbit()
-            handler.postDelayed(this, ORBIT_STEP_MS)
+            handler.postDelayed(this, if (presence == Presence.REST) ORBIT_STEP_MS * 3 else ORBIT_STEP_MS)
         }
     }
 
@@ -255,6 +281,7 @@ class NowPlayingActivity : Activity() {
         super.onStart()
         ReceiverState.observe(stateListener)
         handler.post(tick)
+        handler.post(visualTick)
         handler.postDelayed(presenceTick, presenceTickMs)
         handler.postDelayed(orbitTick, ORBIT_STEP_MS)
         handler.postDelayed(driftTick, 1000)
@@ -312,6 +339,7 @@ class NowPlayingActivity : Activity() {
     }
 
     override fun onStop() {
+        AudioTap.tap.enabled = false
         ReceiverState.remove(stateListener)
         handler.removeCallbacksAndMessages(null)
         settleSongChange()
@@ -383,6 +411,9 @@ class NowPlayingActivity : Activity() {
         val root = FrameLayout(this)
         root.clipChildren = false
         root.addView(backdrop, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        // behind everything else: a row of quiet bars along the bottom edge that move with the music
+        visualizer = VisualizerView(this).apply { alpha = 0f }
+        root.addView(visualizer, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(VISUALIZER_DP), Gravity.BOTTOM))
 
         // ---- artwork: two layers so one cover can slide out while the next slides in
         artA = coverView()
@@ -608,6 +639,19 @@ class NowPlayingActivity : Activity() {
             addView(stage, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         }
         root.addView(orbitLayer, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        // while the left or right key is held: the time the seek will land on, over the progress bar
+        scrubBubble = label(18f, Color.WHITE, medium).apply {
+            alpha = 0f
+            visibility = View.GONE
+            gravity = Gravity.CENTER
+            fontFeatureSettings = "tnum"
+            setPadding(dp(16), dp(8), dp(16), dp(8))
+            background = GradientDrawable().apply {
+                setColor(0xE62C2C30.toInt())
+                cornerRadius = dpf(20f)
+            }
+        }
+        root.addView(scrubBubble, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         root.addView(aod, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         goodnightView = label(22f, 0xFF8E8E93.toInt(), light).apply {
             alpha = 0f
@@ -744,7 +788,7 @@ class NowPlayingActivity : Activity() {
         if (scrubTarget >= 0) endScrub()
         renderAod(s)
         renderLyricsHeader(s)
-        if (presence == Presence.DIM) {
+        if (presence == Presence.DIM || presence == Presence.REST) {
             // A new song shows itself for a moment; this is not someone at the remote, so the idle clock runs on.
             peekUntil = SystemClock.elapsedRealtime() + PEEK_MS
             setPresence(Presence.ACTIVE)
@@ -1003,6 +1047,7 @@ class NowPlayingActivity : Activity() {
             bar.fillColor = fill
             bar.trackColor = track
         }
+        if (this::visualizer.isInitialized) visualizer.color = fill
     }
 
     /** Moves the backdrop and the bars to [colors]; on black (minimal, black, blank) the backdrop stays pure black. */
@@ -1106,6 +1151,7 @@ class NowPlayingActivity : Activity() {
         val fraction = position.toFloat() / s.durationMs
         val elapsed = formatTime(position)
         val remaining = MINUS + formatTime(s.durationMs - position)
+        updateScrubBubble(fraction, position)
         progressBar.setFraction(fraction, false)
         elapsedView.text = elapsed
         remainingView.text = remaining
@@ -1116,6 +1162,34 @@ class NowPlayingActivity : Activity() {
             lyricsRemaining.text = remaining
             lyricsView.setPosition(position + LYRICS_LEAD_MS + s.syncOffsetMs + settings.lyricsOffsetMs)
             lyricsView.setProgress(fraction)
+        }
+    }
+
+    /** The time a seek in progress will land on, and how far it moves, in a bubble over the bar at the place it will land; gone when no seek is. */
+    private fun updateScrubBubble(fraction: Float, target: Long) {
+        if (scrubTarget < 0 || lyricsOpen) {
+            if (scrubBubble.visibility == View.VISIBLE) {
+                scrubBubble.animate().cancel()
+                scrubBubble.animate().alpha(0f).setDuration(200).withEndAction { scrubBubble.visibility = View.GONE }.start()
+            }
+            return
+        }
+        val delta = (target - positionNow()) / 1000
+        val sign = if (delta >= 0) "+" else MINUS
+        scrubBubble.text = "${formatTime(target)}   $sign${abs(delta)} s"
+        val barAt = IntArray(2)
+        progressBar.getLocationInWindow(barAt)
+        scrubBubble.measure(
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+        )
+        val x = barAt[0] + progressBar.width * fraction - scrubBubble.measuredWidth / 2f
+        scrubBubble.translationX = x.coerceIn(dpf(24f), (resources.displayMetrics.widthPixels - scrubBubble.measuredWidth - dpf(24f)))
+        scrubBubble.translationY = barAt[1] - scrubBubble.measuredHeight - dpf(14f)
+        if (scrubBubble.visibility != View.VISIBLE) {
+            scrubBubble.visibility = View.VISIBLE
+            scrubBubble.animate().cancel()
+            scrubBubble.animate().alpha(1f).setDuration(120).start()
         }
     }
 
@@ -1403,6 +1477,7 @@ class NowPlayingActivity : Activity() {
         val pausedFor = if (!latest.playing && pausedSince > 0) now - pausedSince else 0L
         var target = when (timeline.stageFor(idle, pausedFor)) {
             PresenceTimeline.Stage.ACTIVE -> Presence.ACTIVE
+            PresenceTimeline.Stage.REST -> Presence.REST
             PresenceTimeline.Stage.DIM -> Presence.DIM
             PresenceTimeline.Stage.MINIMAL -> Presence.MINIMAL
             PresenceTimeline.Stage.BLACK -> Presence.BLACK
@@ -1433,6 +1508,13 @@ class NowPlayingActivity : Activity() {
                 keepScreenOn(true)
                 stage.animate().cancel()
                 stage.animate().alpha(1f).setDuration(if (leavingDark) 900 else 300).start()
+                hideAod()
+            }
+            Presence.REST -> {
+                // paused for a while: the picture dims to half and the drift slows (see orbitTick), so a pause leaves nothing bright and still
+                keepScreenOn(true)
+                stage.animate().cancel()
+                stage.animate().alpha(REST_ALPHA).setDuration(2500).start()
                 hideAod()
             }
             Presence.DIM -> {
@@ -1648,6 +1730,9 @@ class NowPlayingActivity : Activity() {
         private const val PEEK_MS = 8000L
         private const val PEEK_CLOSE_MS = 6000L
         private const val DIM_ALPHA = 0.35f
+        private const val REST_ALPHA = 0.55f
+        private const val VISUALIZER_DP = 84
+        private const val VISUAL_MS = 50L
         private const val AOD_ALPHA = 0.7f
         private const val ORBIT_STEP_MS = 6_000L
         private const val ORBIT_HOP_MS = 700L

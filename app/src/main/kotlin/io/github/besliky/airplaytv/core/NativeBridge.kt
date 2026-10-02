@@ -42,6 +42,9 @@ object NativeBridge {
 
         /** The photo session is over. */
         fun onPhotoStop()
+
+        /** A second sender was turned away because the current session is kept (see [nativeSetTakeover]). */
+        fun onSessionBlocked(clientName: String)
     }
 
     /** Decoder low-latency options, see video_decoder.h. */
@@ -148,6 +151,12 @@ object NativeBridge {
     fun onPhotoStop() = post { it.onPhotoStop() }
 
     @JvmStatic
+    fun onSessionBlocked(name: ByteArray?) {
+        val n = name.utf8()
+        post { it.onSessionBlocked(n) }
+    }
+
+    @JvmStatic
     fun onRemote(dacpId: ByteArray?, activeRemote: ByteArray?) {
         val d = dacpId.utf8()
         val a = activeRemote.utf8()
@@ -213,4 +222,7 @@ object NativeBridge {
 
     @JvmStatic
     external fun nativeSessionActive(): Boolean
+
+    /** 0: another sender replaces the current session (the default); 1: it is turned away and [Listener.onSessionBlocked] hears of it. */
+    external fun nativeSetTakeover(policy: Int)
 }

@@ -197,6 +197,49 @@ class LgTv(private val connector: Connector, private val settleMs: Long = 200) {
         }
     }
 
+    sealed class SessionResult {
+        class Ready(val session: LgSession) : SessionResult()
+        class Stopped(val outcome: Outcome) : SessionResult()
+    }
+
+    /**
+     * Connects and registers like [press] but keeps the main socket open for requests and subscriptions (see [LgSession]); there is
+     * no button socket. The caller closes the session. Blocking: run it off the main thread.
+     */
+    fun openSession(host: String, clientKey: String?, onPrompt: () -> Unit = {}): SessionResult {
+        val main = try {
+            openMain(host)
+        } catch (e: TvTrust.Untrusted) {
+            return SessionResult.Stopped(Outcome.Untrusted(e))
+        } catch (e: IOException) {
+            return SessionResult.Stopped(Outcome.Unreachable(e.message ?: "no connection"))
+        }
+        try {
+            return when (val handshake = handshake(main, clientKey, onPrompt)) {
+                is Handshake.Stopped -> {
+                    main.close()
+                    SessionResult.Stopped(handshake.outcome)
+                }
+                is Handshake.Registered -> SessionResult.Ready(LgSession(main, handshake.key).also { it.start() })
+            }
+        } catch (e: Exception) {
+            try {
+                main.close()
+            } catch (_: IOException) {
+                // already gone
+            }
+            return SessionResult.Stopped(
+                when (e) {
+                    is TvTrust.Untrusted -> Outcome.Untrusted(e)
+                    is SocketTimeoutException -> Outcome.Failed("the TV did not answer")
+                    is IOException -> Outcome.Failed(e.message ?: "the connection failed")
+                    is JSONException -> Outcome.Failed("the TV sent something unexpected")
+                    else -> throw e
+                },
+            )
+        }
+    }
+
     private sealed class Registration {
         class Key(val value: String) : Registration()
         object Declined : Registration()

@@ -65,4 +65,14 @@ class PresenceTimelineTest {
     fun `a factor below one changes nothing`() {
         assertEquals(Stage.MINIMAL, t.faster(0).stageFor(8 * minute, 0))
     }
+
+    @Test
+    fun `a pause of a minute lets the screen rest, but only when nobody is at the remote`() {
+        assertEquals(Stage.ACTIVE, t.stageFor(2 * minute, 59_000))
+        assertEquals(Stage.REST, t.stageFor(2 * minute, minute))
+        assertEquals(Stage.ACTIVE, t.stageFor(30_000, 5 * minute)) // the pause was just pressed on the remote
+        assertEquals(Stage.ACTIVE, t.stageFor(2 * minute, 0)) // playing: no rest
+        assertEquals(Stage.DIM, t.stageFor(3 * minute, 10 * minute)) // the deeper stages win
+        assertEquals(Stage.REST, t.faster(60).stageFor(1_000, 1_000))
+    }
 }

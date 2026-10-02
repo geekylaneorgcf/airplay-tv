@@ -59,6 +59,8 @@ typedef struct {
     void (*photo)(void *ctx, const char *asset_key, const uint8_t *data, size_t len);
     /* The photo session is over (POST /stop, or the sender closed its event connection). Optional. */
     void (*photo_stop)(void *ctx);
+    /* A second sender asked to start a session while one is playing and was turned away (see airplay_server_set_takeover). Optional. */
+    void (*session_blocked)(void *ctx, const char *client_name);
 } airplay_events_t;
 
 typedef struct {
@@ -75,6 +77,12 @@ void airplay_server_destroy(airplay_server_t *s);
 
 /* Ends the current session from the receiver side (e.g. the user pressed Back). */
 void airplay_server_disconnect(airplay_server_t *s);
+
+/* What happens when another sender starts a session while one is playing: AIRPLAY_TAKEOVER_REPLACE (the default) ends the
+ * current session for it; AIRPLAY_TAKEOVER_KEEP turns the newcomer away (403) and reports it with session_blocked. */
+#define AIRPLAY_TAKEOVER_REPLACE 0
+#define AIRPLAY_TAKEOVER_KEEP 1
+void airplay_server_set_takeover(airplay_server_t *s, int policy);
 
 /* Replaces the list of remembered PIN-paired senders (base64 Ed25519 keys). */
 void airplay_server_set_paired_clients(airplay_server_t *s, const char *const *keys, int count);

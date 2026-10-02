@@ -364,6 +364,29 @@ object Dialogs {
         )
     }
 
+    /**
+     * A question with two answers: [confirmLabel] runs [onConfirm], [cancelLabel] (the one with the focus first) does nothing, and
+     * [onDismiss] runs when the dialog is gone whichever way it went (Back too).
+     */
+    fun prompt(
+        activity: Activity,
+        title: CharSequence,
+        message: CharSequence,
+        confirmLabel: CharSequence,
+        cancelLabel: CharSequence,
+        onConfirm: () -> Unit,
+        onDismiss: () -> Unit,
+    ) {
+        val dialog = present(
+            activity,
+            title,
+            column(activity) { addView(paragraph(activity, message)) },
+            listOf(Action(cancelLabel) {}, Action(confirmLabel, onConfirm)),
+            focus = { it.firstOrNull() },
+        )
+        dialog.setOnDismissListener { onDismiss() }
+    }
+
     /** Scrollable monospace text, for diagnostics and license texts. The text takes the focus so the arrow keys scroll it. */
     fun longText(activity: Activity, title: CharSequence, text: CharSequence) {
         val tv = TextView(activity).apply {

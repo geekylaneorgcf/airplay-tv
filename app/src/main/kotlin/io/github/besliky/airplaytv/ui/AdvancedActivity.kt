@@ -10,6 +10,7 @@ import io.github.besliky.airplaytv.R
 import io.github.besliky.airplaytv.Settings
 import io.github.besliky.airplaytv.core.DecoderSelector
 import io.github.besliky.airplaytv.service.ReceiverService
+import io.github.besliky.airplaytv.service.SelfCheck
 
 /** Advanced settings and maintenance actions. */
 class AdvancedActivity : SettingsPage() {
@@ -49,6 +50,7 @@ class AdvancedActivity : SettingsPage() {
             settings.verboseLogging = !settings.verboseLogging
             bind()
         }
+        addRow(getString(R.string.setting_check)) { runCheck() }.navigates(true)
         appearRow = addRow(getString(R.string.setting_appear)) { toggleAppearance() }
         addRow(getString(R.string.setting_diagnostics)) { exportDiagnostics() }.navigates(true)
         pairedRow = addRow(getString(R.string.setting_paired_devices)) { showPairedDevices() }.navigates(true)
@@ -76,6 +78,16 @@ class AdvancedActivity : SettingsPage() {
                 else -> getString(R.string.value_appear_speaker)
             },
         )
+    }
+
+    /** Asks the receiver about itself and says, in plain words, why a phone might not see this TV. */
+    private fun runCheck() {
+        Thread {
+            val findings = SelfCheck.evaluate(SelfCheck.gather(this, settings))
+            runOnUiThread {
+                if (!isDestroyed) Dialogs.message(this, getString(R.string.check_title), SelfCheck.text(findings))
+            }
+        }.start()
     }
 
     /** Apple TV is the default and works with everything; the speaker is a trial that undoes itself, see [Appearance]. */

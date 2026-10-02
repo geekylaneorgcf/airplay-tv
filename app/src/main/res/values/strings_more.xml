@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- a second phone while one plays -->
+    <string name="setting_takeover">When A Second Phone Plays</string>
+    <string name="value_takeover_replace">It Takes Over</string>
+    <string name="value_takeover_keep">Keep The Current One</string>
+    <string name="value_takeover_ask">Ask Me</string>
+    <string name="takeover_somebody">A phone</string>
+    <string name="takeover_title">%1$s wants to play</string>
+    <string name="takeover_message">%1$s is playing on this TV now. Let %2$s play instead?</string>
+    <string name="takeover_let">Let It Play</string>
+    <string name="takeover_keep">Keep What Plays</string>
+    <string name="takeover_blocked">%1$s was turned away; %2$s keeps playing</string>
+
+    <!-- volume limits -->
+    <string name="setting_volume">Volume Limits</string>
+    <string name="volume_title">Volume Limits</string>
+    <string name="volume_max">Maximum Volume</string>
+    <string name="volume_night_max">Night Maximum</string>
+    <string name="volume_night_from">Night Starts</string>
+    <string name="volume_night_to">Night Ends</string>
+    <string name="volume_start">Start Level</string>
+    <string name="value_percent">%1$d%%</string>
+    <string name="value_no_limit">No Limit</string>
+    <string name="value_hour">%1$d %2$s</string>
+
+    <!-- sound -->
+    <string name="setting_sound">Sound</string>
+    <string name="sound_title">Sound</string>
+    <string name="sound_bass">Bass</string>
+    <string name="sound_treble">Treble</string>
+    <string name="sound_loudness">Loudness</string>
+    <string name="sound_night">Night Mode</string>
+    <string name="value_step">%1$+d</string>
+    <string name="value_flat">Flat</string>
+    <string name="value_loudness_low">Low</string>
+    <string name="value_loudness_medium">Medium</string>
+    <string name="value_loudness_high">High</string>
+
+    <!-- the TV -->
+    <string name="setting_tv_features">TV Features</string>
+    <string name="tv_features_title">TV Features</string>
+    <string name="tv_wake">Wake The TV</string>
+    <string name="tv_input">The Stick’s TV Input</string>
+    <string name="tv_music_mode">Music Mode</string>
+    <string name="tv_smart_pause">Smart Pause</string>
+    <string name="tv_volume">TV Volume</string>
+    <string name="tv_forget">Forget The TV</string>
+    <string name="tv_status">The TV</string>
+    <string name="value_tv_paired">Connected</string>
+    <string name="value_tv_not_paired">Not Connected</string>
+    <string name="value_input_unknown">Not Detected</string>
+    <string name="tv_needs_pairing">Connect the TV first, with the TV Settings Button.</string>
+    <string name="tv_detecting">Asking the TV…</string>
+    <string name="tv_detected">The stick is on %1$s of the TV.</string>
+    <string name="tv_detect_failed">The TV did not say. Is it on, with this stick’s picture in front?</string>
+    <string name="tv_wake_hint">To be woken over the network, the TV needs its own setting: General, Devices, External Devices, TV On With Mobile, Turn On Via Wi-Fi.</string>
+
+    <!-- the check -->
+    <string name="setting_check">Check The Receiver</string>
+    <string name="check_title">Is this TV visible to phones?</string>
+    <string name="visualizer_setting">Visualizer</string>
+    <string name="whats_new_title">What’s new in %1$s</string>
+</resources>

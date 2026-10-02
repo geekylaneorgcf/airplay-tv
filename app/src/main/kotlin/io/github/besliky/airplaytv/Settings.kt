@@ -111,9 +111,101 @@ class Settings(context: Context) {
         get() = prefs.getString(KEY_LG_CERT, "") ?: ""
         set(value) = prefs.edit().putString(KEY_LG_CERT, value).apply()
 
-    /** Forgets the TV: its address, the pairing key and the pinned certificate. */
+
+    /** Wake the TV over the network (Wake-on-LAN) when a sender connects while it is off. Needs the TV paired; the TV's own setting "Turn on via Wi-Fi" must be on. */
+    var tvWake: Boolean
+        get() = prefs.getBoolean(KEY_TV_WAKE, true)
+        set(value) = prefs.edit().putBoolean(KEY_TV_WAKE, value).apply()
+
+    /** The TV's hardware addresses (wired and wireless), comma separated, learned from the TV when it was paired. */
+    var lgMacs: String
+        get() = prefs.getString(KEY_LG_MACS, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_LG_MACS, value).apply()
+
+    /** What the TV shows when this stick is its input (`com.webos.app.hdmi1`), learned while the owner was looking at this stick's own screen. */
+    var lgInput: String
+        get() = prefs.getString(KEY_LG_INPUT, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_LG_INPUT, value).apply()
+
+    /** While only music plays, turn the TV's screen off (the sound goes on) and back on at the next key or when the music ends. */
+    var musicMode: Boolean
+        get() = prefs.getBoolean(KEY_MUSIC_MODE, false)
+        set(value) = prefs.edit().putBoolean(KEY_MUSIC_MODE, value).apply()
+
+    /** Pause the phone's music when the TV is switched to another input or off. */
+    var smartPause: Boolean
+        get() = prefs.getBoolean(KEY_SMART_PAUSE, true)
+        set(value) = prefs.edit().putBoolean(KEY_SMART_PAUSE, value).apply()
+
+    /** Move the TV's own volume with the phone's slider and the remote's volume keys, when the TV lets it be moved. */
+    var tvVolume: Boolean
+        get() = prefs.getBoolean(KEY_TV_VOLUME, true)
+        set(value) = prefs.edit().putBoolean(KEY_TV_VOLUME, value).apply()
+
+    /** Volume limits, see [io.github.besliky.airplaytv.service.VolumeLimits]. */
+    var maxVolumePercent: Int
+        get() = prefs.getInt(KEY_VOLUME_MAX, 100).let { if (it in MAX_VOLUME_CHOICES) it else 100 }
+        set(value) = prefs.edit().putInt(KEY_VOLUME_MAX, value).apply()
+
+    var nightVolumePercent: Int
+        get() = prefs.getInt(KEY_VOLUME_NIGHT, 0).let { if (it in NIGHT_VOLUME_CHOICES) it else 0 }
+        set(value) = prefs.edit().putInt(KEY_VOLUME_NIGHT, value).apply()
+
+    var nightFromHour: Int
+        get() = prefs.getInt(KEY_NIGHT_FROM, 22).let { if (it in NIGHT_FROM_CHOICES) it else 22 }
+        set(value) = prefs.edit().putInt(KEY_NIGHT_FROM, value).apply()
+
+    var nightToHour: Int
+        get() = prefs.getInt(KEY_NIGHT_TO, 7).let { if (it in NIGHT_TO_CHOICES) it else 7 }
+        set(value) = prefs.edit().putInt(KEY_NIGHT_TO, value).apply()
+
+    var startVolumePercent: Int
+        get() = prefs.getInt(KEY_VOLUME_START, 0).let { if (it in START_VOLUME_CHOICES) it else 0 }
+        set(value) = prefs.edit().putInt(KEY_VOLUME_START, value).apply()
+
+    fun volumeLimits() = io.github.besliky.airplaytv.service.VolumeLimits.Config(
+        maxPercent = maxVolumePercent,
+        nightMaxPercent = nightVolumePercent,
+        nightFromHour = nightFromHour,
+        nightToHour = nightToHour,
+        startPercent = startVolumePercent,
+    )
+
+    /** What happens when a second phone starts playing while one is: [TAKEOVER_REPLACE], [TAKEOVER_KEEP] or [TAKEOVER_ASK]. */
+    var takeover: Int
+        get() = prefs.getInt(KEY_TAKEOVER, TAKEOVER_REPLACE).let { if (it in TAKEOVER_CHOICES) it else TAKEOVER_REPLACE }
+        set(value) = prefs.edit().putInt(KEY_TAKEOVER, value).apply()
+
+    /** Sound: bass and treble in steps of 3 dB (-3 to 3), a loudness boost (0 to 3) and a night mode that evens out loud and quiet. */
+    var bass: Int
+        get() = prefs.getInt(KEY_BASS, 0).coerceIn(-3, 3)
+        set(value) = prefs.edit().putInt(KEY_BASS, value.coerceIn(-3, 3)).apply()
+
+    var treble: Int
+        get() = prefs.getInt(KEY_TREBLE, 0).coerceIn(-3, 3)
+        set(value) = prefs.edit().putInt(KEY_TREBLE, value.coerceIn(-3, 3)).apply()
+
+    var loudness: Int
+        get() = prefs.getInt(KEY_LOUDNESS, 0).coerceIn(0, 3)
+        set(value) = prefs.edit().putInt(KEY_LOUDNESS, value.coerceIn(0, 3)).apply()
+
+    var nightMode: Boolean
+        get() = prefs.getBoolean(KEY_NIGHT_MODE, false)
+        set(value) = prefs.edit().putBoolean(KEY_NIGHT_MODE, value).apply()
+
+    /** A calm visualizer on the Now Playing screen. */
+    var visualizer: Boolean
+        get() = prefs.getBoolean(KEY_VISUALIZER, true)
+        set(value) = prefs.edit().putBoolean(KEY_VISUALIZER, value).apply()
+
+    /** The version whose "What's new" has been shown. */
+    var seenVersion: String
+        get() = prefs.getString(KEY_SEEN_VERSION, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_SEEN_VERSION, value).apply()
+
+    /** Forgets the TV: its address, the pairing key, the pinned certificate and what was learned about it. */
     fun forgetTv() {
-        prefs.edit().remove(KEY_LG_HOST).remove(KEY_LG_KEY).remove(KEY_LG_CERT).apply()
+        prefs.edit().remove(KEY_LG_HOST).remove(KEY_LG_KEY).remove(KEY_LG_CERT).remove(KEY_LG_MACS).remove(KEY_LG_INPUT).apply()
     }
 
     /**
@@ -151,6 +243,36 @@ class Settings(context: Context) {
         const val KEY_LG_HOST = "lg_host"
         const val KEY_LG_KEY = "lg_client_key"
         const val KEY_LG_CERT = "lg_certificate"
+        const val KEY_LG_MACS = "lg_macs"
+        const val KEY_LG_INPUT = "lg_input"
+        const val KEY_TV_WAKE = "tv_wake"
+        const val KEY_MUSIC_MODE = "music_mode"
+        const val KEY_SMART_PAUSE = "smart_pause"
+        const val KEY_TV_VOLUME = "tv_volume"
+        const val KEY_VOLUME_MAX = "volume_max"
+        const val KEY_VOLUME_NIGHT = "volume_night"
+        const val KEY_NIGHT_FROM = "night_from"
+        const val KEY_NIGHT_TO = "night_to"
+        const val KEY_VOLUME_START = "volume_start"
+        const val KEY_TAKEOVER = "takeover"
+        const val KEY_BASS = "bass"
+        const val KEY_TREBLE = "treble"
+        const val KEY_LOUDNESS = "loudness"
+        const val KEY_NIGHT_MODE = "night_mode"
+        const val KEY_VISUALIZER = "visualizer"
+        const val KEY_SEEN_VERSION = "seen_version"
+
+        /** What each limit offers, in the order the setting cycles through (the first is "no limit"). */
+        val MAX_VOLUME_CHOICES = listOf(100, 90, 80, 70, 60, 50, 40)
+        val NIGHT_VOLUME_CHOICES = listOf(0, 50, 40, 30, 20)
+        val NIGHT_FROM_CHOICES = listOf(20, 21, 22, 23, 0)
+        val NIGHT_TO_CHOICES = listOf(5, 6, 7, 8, 9)
+        val START_VOLUME_CHOICES = listOf(0, 50, 40, 30, 20)
+
+        const val TAKEOVER_REPLACE = 0
+        const val TAKEOVER_KEEP = 1
+        const val TAKEOVER_ASK = 2
+        val TAKEOVER_CHOICES = listOf(TAKEOVER_REPLACE, TAKEOVER_KEEP, TAKEOVER_ASK)
 
         /** The choices offered for Sleep After Music; 0 is off. */
         val SLEEP_CHOICES = listOf(0, 2, 5, 10, 20)

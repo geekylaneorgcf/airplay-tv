@@ -11,8 +11,10 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings as SystemSettings
 import android.view.KeyEvent
+import io.github.besliky.airplaytv.BuildConfig
 import io.github.besliky.airplaytv.R
 import io.github.besliky.airplaytv.Settings
+import io.github.besliky.airplaytv.WhatsNew
 import io.github.besliky.airplaytv.lg.TvMenuMode
 import io.github.besliky.airplaytv.lg.TvSettings
 import io.github.besliky.airplaytv.service.AccessibilitySetup
@@ -38,6 +40,8 @@ class MainActivity : SettingsPage() {
     private lateinit var sleepRow: Row
     private lateinit var returnRow: Row
     private lateinit var tvMenuRow: Row
+    private lateinit var visualizerRow: Row
+    private lateinit var takeoverRow: Row
 
     private val stateListener: (ReceiverState.Snapshot) -> Unit = { render(it) }
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> bindRows() }
@@ -72,6 +76,20 @@ class MainActivity : SettingsPage() {
         sleepRow = addRow(getString(R.string.setting_sleep)) { cycleSleep() }
         returnRow = addRow(getString(R.string.setting_return)) { toggleReturn() }
         tvMenuRow = addRow(getString(R.string.setting_tv_menu)) { configureTvMenu() }
+        addRow(getString(R.string.setting_tv_features)) {
+            startActivity(Intent(this, TvFeaturesActivity::class.java))
+        }.navigates(true)
+        addRow(getString(R.string.setting_volume)) {
+            startActivity(Intent(this, VolumeActivity::class.java))
+        }.navigates(true)
+        addRow(getString(R.string.setting_sound)) {
+            startActivity(Intent(this, SoundActivity::class.java))
+        }.navigates(true)
+        visualizerRow = addRow(getString(R.string.visualizer_setting)) { settings.visualizer = !settings.visualizer }
+        takeoverRow = addRow(getString(R.string.setting_takeover)) {
+            val choices = Settings.TAKEOVER_CHOICES
+            settings.takeover = choices[(choices.indexOf(settings.takeover) + 1) % choices.size]
+        }
         addRow(getString(R.string.setting_advanced)) {
             startActivity(Intent(this, AdvancedActivity::class.java))
         }.navigates(true)
@@ -258,6 +276,21 @@ class MainActivity : SettingsPage() {
         settings.registerListener(prefsListener)
         ReceiverState.observe(stateListener)
         bindRows()
+        showWhatsNewOnce()
+    }
+
+    /** After an update, once: the few plain lines in `res/raw/whats_new.txt`. */
+    private fun showWhatsNewOnce() {
+        val lines = WhatsNew.parse(
+            try {
+                resources.openRawResource(R.raw.whats_new).bufferedReader().use { it.readText() }
+            } catch (_: Exception) {
+                null
+            },
+        )
+        if (!WhatsNew.shouldShow(settings.seenVersion, BuildConfig.VERSION_NAME, lines)) return
+        settings.seenVersion = BuildConfig.VERSION_NAME
+        Dialogs.message(this, getString(R.string.whats_new_title, BuildConfig.VERSION_NAME), lines!!.joinToString("\n\n"))
     }
 
     override fun onStop() {
@@ -287,6 +320,16 @@ class MainActivity : SettingsPage() {
         sleepRow.value(sleepValue())
         returnRow.value(onOff(settings.returnToPlayer))
         tvMenuRow.value(tvMenuValue())
+        visualizerRow.value(onOff(settings.visualizer))
+        takeoverRow.value(
+            getString(
+                when (settings.takeover) {
+                    Settings.TAKEOVER_KEEP -> R.string.value_takeover_keep
+                    Settings.TAKEOVER_ASK -> R.string.value_takeover_ask
+                    else -> R.string.value_takeover_replace
+                },
+            ),
+        )
         infoRow.value(onOff(settings.showConnectionInfo))
         autoOpenRow.visible(Build.VERSION.SDK_INT >= 29)
             .value(getString(if (canOpenAutomatically()) R.string.value_allowed else R.string.value_allow))

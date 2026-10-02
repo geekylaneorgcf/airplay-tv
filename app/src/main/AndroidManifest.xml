@@ -6,6 +6,7 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
@@ -48,6 +49,26 @@
         <activity
             android:name=".ui.AdvancedActivity"
             android:exported="false" />
+
+        <activity
+            android:name=".ui.VolumeActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".ui.SoundActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".ui.TvFeaturesActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".ui.TakeoverActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:taskAffinity=".takeover"
+            android:theme="@style/Theme.AirPlayTV.Overlay" />
 
         <activity
             android:name=".ui.PhotoActivity"
@@ -111,6 +132,7 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="io.github.besliky.airplaytv.action.QUERY_NOW_PLAYING" />
+                <action android:name="io.github.besliky.airplaytv.action.COMMAND" />
             </intent-filter>
         </receiver>
 

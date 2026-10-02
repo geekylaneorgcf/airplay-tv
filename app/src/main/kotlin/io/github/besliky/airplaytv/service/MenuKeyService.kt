@@ -57,6 +57,7 @@ class MenuKeyService : AccessibilityService() {
     override fun onInterrupt() = Unit
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN && !VolumeKeys.isVolumeKey(event.keyCode)) UserKeys.listener?.invoke()
         // The volume keys, while the receiver has asked for them (the TV owns the volume); otherwise they go on to the system.
         if (VolumeKeys.onKey(event.keyCode, event.action)) return true
         // Menu opens the TV's menu; while it is open the arrow keys, OK and Back steer it. Every other key is left alone.
