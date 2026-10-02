@@ -271,6 +271,7 @@ class NowPlayingActivity : Activity() {
     override fun onResume() {
         super.onResume()
         foreground = true
+        onScreen = true
         if (peekRequested) {
             peekRequested = false
             peekCloseAt = SystemClock.elapsedRealtime() + PEEK_CLOSE_MS
@@ -282,6 +283,7 @@ class NowPlayingActivity : Activity() {
     override fun onPause() {
         stopScanning()
         foreground = false
+        onScreen = false
         handler.removeCallbacks(closePeek)
         peekCloseAt = 0L
         super.onPause()
@@ -1601,6 +1603,10 @@ class NowPlayingActivity : Activity() {
     }
 
     companion object {
+        /** True while this player is the screen in front: it has a volume bar of its own, so the service's is not shown over it. */
+        @Volatile
+        var onScreen = false
+
         const val EXTRA_PREVIEW = "preview"
         const val EXTRA_SPEED = "speed"
         const val EXTRA_IDLE = "idle"

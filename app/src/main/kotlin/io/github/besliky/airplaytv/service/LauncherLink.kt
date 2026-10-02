@@ -6,7 +6,7 @@ import android.content.Intent
 /**
  * Tells the home screen app (tvhome) whether something is being played over AirPlay, so that its status strip can
  * show an "AirPlay" chip that takes you back to the player. It is one-way and small: a broadcast addressed to that app
- * alone, with the kind of session and the title and artist. The home screen asks for the current state with
+ * alone, with the kind of session, the title and artist, and whether the music plays or is paused. The home screen asks for the current state with
  * [ACTION_QUERY] when it comes to the front, because it may not have been running when the state last changed.
  */
 object LauncherLink {
@@ -18,17 +18,19 @@ object LauncherLink {
     const val EXTRA_KIND = "kind"
     const val EXTRA_TITLE = "title"
     const val EXTRA_ARTIST = "artist"
+    const val EXTRA_PLAYING = "playing"
 
     enum class Kind(val wire: String) { NONE("none"), AUDIO("audio"), VIDEO("video") }
 
-    data class State(val kind: Kind, val title: String, val artist: String)
+    /** [playing] is false while the music is paused (the session goes on, the chip should say so); it means nothing for video. */
+    data class State(val kind: Kind, val title: String, val artist: String, val playing: Boolean = true)
 
     /** What the home screen should show for this snapshot of the receiver. */
     fun stateOf(s: ReceiverState.Snapshot): State {
         if (s.status != ReceiverState.Status.CONNECTED) return State(Kind.NONE, "", "")
         return when {
             s.videoActive -> State(Kind.VIDEO, "", "")
-            s.audioActive -> State(Kind.AUDIO, s.title, s.artist)
+            s.audioActive -> State(Kind.AUDIO, s.title, s.artist, s.playing)
             else -> State(Kind.NONE, "", "")
         }
     }
@@ -56,6 +58,7 @@ object LauncherLink {
             .putExtra(EXTRA_KIND, state.kind.wire)
             .putExtra(EXTRA_TITLE, state.title)
             .putExtra(EXTRA_ARTIST, state.artist)
+            .putExtra(EXTRA_PLAYING, state.playing)
         try {
             context.sendBroadcast(intent)
         } catch (_: RuntimeException) {

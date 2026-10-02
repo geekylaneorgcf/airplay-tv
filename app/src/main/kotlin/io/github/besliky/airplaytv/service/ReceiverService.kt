@@ -111,6 +111,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
     private fun startVolumeWatch() {
         val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         handler.removeCallbacks(volumeWatch)
+        takeVolumeKeys(false)
         try {
             savedStreamIndex = am.getStreamVolume(AudioManager.STREAM_MUSIC)
             if (am.isStreamMute(AudioManager.STREAM_MUSIC)) {
@@ -118,8 +119,9 @@ class ReceiverService : Service(), NativeBridge.Listener {
             }
             am.setStreamVolume(AudioManager.STREAM_MUSIC, STREAM_CENTER, 0)
             if (am.getStreamVolume(AudioManager.STREAM_MUSIC) != STREAM_CENTER) {
-                Log.i(SESSION, "the system volume cannot be moved here (the TV controls it): the remote's volume keys are the TV's")
+                Log.i(SESSION, "the system volume cannot be moved here (the TV controls it): the remote's volume keys step the receiver's volume")
                 savedStreamIndex = -1
+                takeVolumeKeys(true)
                 return
             }
         } catch (e: RuntimeException) {
@@ -131,6 +133,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
 
     private fun stopVolumeWatch() {
         handler.removeCallbacks(volumeWatch)
+        takeVolumeKeys(false)
         if (savedStreamIndex >= 0) {
             try {
                 (getSystemService(Context.AUDIO_SERVICE) as AudioManager)
@@ -151,27 +154,56 @@ class ReceiverService : Service(), NativeBridge.Listener {
                 // The mute key: toggle the receiver's own mute and release the system one so the
                 // next press is seen again.
                 am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_UNMUTE, 0)
-                val current = currentVolume()
-                if (current > 0f) {
-                    levelBeforeMute = current
-                    setVolumeLevel(0f)
-                } else {
-                    setVolumeLevel(levelBeforeMute.coerceAtLeast(1f / OUTPUT_STEPS))
-                }
+                toggleMute()
             } else if (index != STREAM_CENTER) {
                 am.setStreamVolume(AudioManager.STREAM_MUSIC, STREAM_CENTER, 0)
                 if (am.getStreamVolume(AudioManager.STREAM_MUSIC) != STREAM_CENTER) {
                     // The output turned into one the system will not move (the TV came on over CEC): that number is
                     // not a key press, so leave the volume alone and stop looking until the next session.
-                    Log.i(SESSION, "the system volume stopped moving: the TV controls it now")
+                    Log.i(SESSION, "the system volume stopped moving: the TV controls it now, the remote's volume keys step the receiver's volume")
                     handler.removeCallbacks(volumeWatch)
                     savedStreamIndex = -1
+                    takeVolumeKeys(true)
                     return
                 }
                 setVolumeLevel(VolumeScale.stepped(currentVolume(), index - STREAM_CENTER, OUTPUT_STEPS))
             }
         } catch (e: RuntimeException) {
             Log.w(SESSION, "volume watch failed", e)
+        }
+    }
+
+    /**
+     * While the system will not move its volume, the remote's volume keys are not the system's to handle: the accessibility
+     * service hands them over (see [VolumeKeys]) and they step the level the phone's slider also sets, so there is one volume.
+     */
+    private fun takeVolumeKeys(on: Boolean) {
+        if (on) {
+            VolumeKeys.take { keyCode -> handler.post { onVolumeKey(keyCode) } }
+        } else {
+            VolumeKeys.take(null)
+        }
+    }
+
+    private fun onVolumeKey(keyCode: Int) {
+        if (ReceiverState.current.status != Status.CONNECTED) return
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_MUTE) {
+            toggleMute()
+        } else {
+            val step = if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) 1 else -1
+            setVolumeLevel(VolumeScale.stepped(currentVolume(), step, OUTPUT_STEPS))
+        }
+        Log.i(SESSION, "remote volume key: the level is now ${"%.2f".format(ReceiverState.current.volume)}")
+    }
+
+    /** Mute, or the volume from before the mute when it is muted already. */
+    private fun toggleMute() {
+        val current = currentVolume()
+        if (current > 0f) {
+            levelBeforeMute = current
+            setVolumeLevel(0f)
+        } else {
+            setVolumeLevel(levelBeforeMute.coerceAtLeast(1f / OUTPUT_STEPS))
         }
     }
 

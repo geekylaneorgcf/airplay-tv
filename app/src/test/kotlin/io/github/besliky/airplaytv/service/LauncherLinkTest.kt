@@ -15,6 +15,14 @@ class LauncherLinkTest {
     }
 
     @Test
+    fun `paused music is still audio, and says it is paused`() {
+        val s = Snapshot(status = Status.CONNECTED, audioActive = true, title = "Dil Lagiyan", artist = "Navaan Sandhu", playing = false)
+        assertEquals(LauncherLink.State(Kind.AUDIO, "Dil Lagiyan", "Navaan Sandhu", playing = false), LauncherLink.stateOf(s))
+        // a change of play and pause alone is a different state: the home screen is told
+        assertEquals(false, LauncherLink.stateOf(s) == LauncherLink.stateOf(s.copy(playing = true)))
+    }
+
+    @Test
     fun `a mirrored screen or a video is video, whatever else is going on`() {
         val s = Snapshot(status = Status.CONNECTED, videoActive = true, audioActive = true, title = "x", artist = "y")
         assertEquals(LauncherLink.State(Kind.VIDEO, "", ""), LauncherLink.stateOf(s))

@@ -69,8 +69,15 @@
 - Volume stuck at 0 with the TV on HDMI-CEC: with CEC on, the stick treats the HDMI output as a fixed-volume device and ignores
   every change of the system volume, so the number the receiver reads as "a remote key was pressed" stayed at 0, and "eight steps
   down" was read at every look, pinning the receiver's volume to silence whatever the phone's slider said. The watch now checks that
-  it can park the system volume in the middle and stays out of it when it cannot (the TV's own volume is then the remote's, the
-  phone's slider is the receiver's).
+  it can park the system volume in the middle and stays out of it when it cannot.
+- One volume on a fixed-volume output (HDMI-CEC): the remote's volume and mute keys did nothing then, because Fire OS drops them. The
+  Menu button service (the accessibility service) sees the keys before Fire OS does, so while a session runs on such an output it takes
+  them and steps the receiver's level, the one the phone's slider also sets; with the service off, or on an output whose volume the
+  system can move, nothing changes. A volume bar is drawn over the screen in front (an accessibility overlay: no permission of its own)
+  whenever the level moves during a session, from the remote or the phone, except over the player, which has a bar of its own. The
+  phone's slider is not moved by the remote (AirPlay gives the receiver no way to), its next change replaces the level.
+- The "AirPlay" chip tells whether the music plays or is paused (the broadcast has a `playing` extra), so the home screen can show
+  a pause mark and "Paused".
 - Song changes are one motion. A skip arrives over a second, and each step still moved something (the title, the progress, the
   album, then the cover over the old one as a see-through overlay, then the backdrop's colours). The change is now held until the
   cover is in, then everything moves once, together, for 0.64 s: the new cover slides in over the old (both opaque, so the picture
