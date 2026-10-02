@@ -63,7 +63,8 @@ object TrackMotion {
      */
     fun commitDelayMs(beganAt: Long, readyAt: Long, now: Long): Long {
         val deadline = beganAt + HOLD_MS
-        val at = if (readyAt > 0L) minOf(readyAt + SETTLE_MS, deadline) else deadline
+        // a cover that came before the title counts from the title: the album and the progress still follow it
+        val at = if (readyAt > 0L) minOf(maxOf(readyAt, beganAt) + SETTLE_MS, deadline) else deadline
         return (at - now).coerceAtLeast(0L)
     }
 

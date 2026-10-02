@@ -65,8 +65,8 @@ class TrackMotionTest {
         // the deadline was 2100: 50 ms left, though the settle alone would be 160
         assertEquals(50L, TrackMotion.commitDelayMs(1000, readyAt = 2000, now = 2050))
         assertEquals(0L, TrackMotion.commitDelayMs(1000, 0, 5000))
-        // a cover that came before the change (readyAt in the past) is shown after the settle only
-        assertEquals(0L, TrackMotion.commitDelayMs(1000, readyAt = 900, now = 1000))
+        // a cover that came before the title counts from the title: the album and the progress still follow it
+        assertEquals(TrackMotion.SETTLE_MS, TrackMotion.commitDelayMs(1000, readyAt = 900, now = 1000))
     }
 
     @Test
