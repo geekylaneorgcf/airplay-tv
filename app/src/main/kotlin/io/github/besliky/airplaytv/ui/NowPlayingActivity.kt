@@ -1,5 +1,7 @@
 package io.github.besliky.airplaytv.ui
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
 import android.animation.ArgbEvaluator
 import android.animation.ValueAnimator
 import android.app.Activity
@@ -79,6 +81,15 @@ class NowPlayingActivity : Activity() {
     private var slideStartedAt = 0L
     private var shownCover: Bitmap? = null
     private var pausePending = false
+
+    // A change of song is one motion (see TrackMotion): it is held until its cover is in, then the cover, the text and
+    // the colours move together. These say whether one is waiting, and the one that is running.
+    private var changePending = false
+    private var changeBeganAt = 0L
+    private var changeReadyAt = 0L // when the cover (or the proof that it stays) came; 0 until then
+    private var changeDirection = 1
+    private var shot: ValueAnimator? = null
+    private val commitChange = Runnable { commitSongChange() }
 
     // seeking with the left and right keys
     private var scrubTarget = -1L // where the seek will land, while keys are pressed and until the sender has answered
@@ -301,7 +312,31 @@ class NowPlayingActivity : Activity() {
     override fun onStop() {
         ReceiverState.remove(stateListener)
         handler.removeCallbacksAndMessages(null)
+        settleSongChange()
         super.onStop()
+    }
+
+    /** Leaving the screen with a song change held or moving: put the page where it was going, without the motion. */
+    private fun settleSongChange() {
+        shot?.cancel()
+        shot = null
+        val s = latest
+        if (changePending) {
+            changePending = false
+            setTextNow(titleView, displayTitle(s))
+            setTextNow(artistView, s.artist)
+            setTextNow(albumView, s.album)
+            artistView.visibility = if (s.artist.isBlank()) View.GONE else View.VISIBLE
+            albumView.visibility = if (s.album.isBlank()) View.GONE else View.VISIBLE
+            if (s.artwork !== shownCover && changeReadyAt > 0L) {
+                showArtwork(s.artwork, 1, animate = false)
+                applyArtworkColors(s.artColors ?: ArtworkColors.NEUTRAL, animate = false)
+            }
+        }
+        for (view in listOf(titleView, artistView, albumView)) {
+            view.alpha = 1f
+            view.translationX = 0f
+        }
     }
 
     override fun onDestroy() {
@@ -705,13 +740,6 @@ class NowPlayingActivity : Activity() {
         knownAlbum = s.album
         Log.i(MOTION, "song changed (direction $dir), album now \"${s.album}\"")
         if (scrubTarget >= 0) endScrub()
-        swapText(titleView, displayTitle(s), dir, 0)
-        swapText(artistView, s.artist, dir, 50)
-        swapText(albumView, s.album, dir, 100)
-        artistView.visibility = if (s.artist.isBlank()) View.GONE else View.VISIBLE
-        albumView.visibility = if (s.album.isBlank()) View.GONE else View.VISIBLE
-        progressBar.setFraction(0f, false)
-        lyricsProgress.setFraction(0f, false)
         renderAod(s)
         renderLyricsHeader(s)
         if (presence == Presence.DIM) {
@@ -725,9 +753,49 @@ class NowPlayingActivity : Activity() {
         // the old cover stays for a good while; only a song that really has none loses it. A cover that
         // arrived just before the info is kept, and so is the cover of the same album (seen once its name
         // follows, see onDetailsChanged).
+        // Nothing on the page moves yet: the change is held until the cover is in and then shown in one motion.
         handler.removeCallbacks(clearArtwork)
-        val sameAlbum = s.album.isNotBlank() && s.album == albumBefore
-        if (!sameAlbum && SystemClock.elapsedRealtime() - lastArtworkAt > ARTWORK_GRACE_MS) {
+        val now = SystemClock.elapsedRealtime()
+        shot?.end()
+        changePending = true
+        changeBeganAt = now
+        changeDirection = dir
+        // a cover that came just before the title belongs to this song; so does the cover of the album that goes on
+        changeReadyAt = if (now - lastArtworkAt <= ARTWORK_GRACE_MS || (s.album.isNotBlank() && s.album == albumBefore)) now else 0L
+        scheduleCommit(now)
+    }
+
+    private fun scheduleCommit(now: Long) {
+        handler.removeCallbacks(commitChange)
+        handler.postDelayed(commitChange, TrackMotion.commitDelayMs(changeBeganAt, changeReadyAt, now))
+    }
+
+    /** The cover (or the proof that the old one stays) is in: the held song change can be shown a moment from now. */
+    private fun changeReady() {
+        val now = SystemClock.elapsedRealtime()
+        if (changeReadyAt == 0L) changeReadyAt = now
+        scheduleCommit(now)
+    }
+
+    /** Shows the held song change, all at once: the cover slides, the text turns over and the colours move together. */
+    private fun commitSongChange() {
+        handler.removeCallbacks(commitChange)
+        if (!changePending) return
+        changePending = false
+        val s = latest
+        val cover = s.artwork
+        val coverCame = changeReadyAt > 0L
+        val newCover = coverCame && cover !== shownCover
+        Log.i(MOTION, "song change: showing it (cover ${if (newCover) "new" else if (coverCame) "kept" else "not here yet"})")
+        runShot(
+            changeDirection,
+            Texts(displayTitle(s), s.artist, s.album),
+            newCover,
+            cover,
+            if (newCover) (s.artColors ?: ArtworkColors.NEUTRAL) else null,
+        )
+        // no cover at all for a song of another album: the old one goes after a while (see clearArtwork)
+        if (!coverCame && !(s.album.isNotBlank() && s.album == albumBefore)) {
             handler.postDelayed(clearArtwork, TrackMotion.COVER_WAIT_MS)
         }
     }
@@ -737,17 +805,20 @@ class NowPlayingActivity : Activity() {
      * changed moves, and nothing that is still sliding in is cut short.
      */
     private fun onDetailsChanged(s: ReceiverState.Snapshot) {
-        val dir = s.trackDirection
-        artistView.visibility = if (s.artist.isBlank()) View.GONE else View.VISIBLE
-        albumView.visibility = if (s.album.isBlank()) View.GONE else View.VISIBLE
-        swapText(titleView, displayTitle(s), dir, 0)
-        swapText(artistView, s.artist, dir, 50)
-        swapText(albumView, s.album, dir, 100)
-        if (s.album.isNotBlank()) {
-            // A new song of the album that was already showing keeps its cover.
-            if (s.album == albumBefore) handler.removeCallbacks(clearArtwork)
-            knownAlbum = s.album
+        if (changePending) {
+            // held with the rest of the change: the text is read when it is shown. A new song of the album that was
+            // already showing keeps its cover, so there is nothing more to wait for.
+            if (s.album.isNotBlank() && s.album == albumBefore) changeReady()
+        } else {
+            val dir = s.trackDirection
+            artistView.visibility = if (s.artist.isBlank()) View.GONE else View.VISIBLE
+            albumView.visibility = if (s.album.isBlank()) View.GONE else View.VISIBLE
+            swapText(titleView, displayTitle(s), dir, 0)
+            swapText(artistView, s.artist, dir, 50)
+            swapText(albumView, s.album, dir, 100)
+            if (s.album.isNotBlank() && s.album == albumBefore) handler.removeCallbacks(clearArtwork)
         }
+        if (s.album.isNotBlank()) knownAlbum = s.album
         renderAod(s)
         renderLyricsHeader(s)
     }
@@ -756,6 +827,12 @@ class NowPlayingActivity : Activity() {
         handler.removeCallbacks(clearArtwork)
         val now = SystemClock.elapsedRealtime()
         lastArtworkAt = now
+        if (changePending) {
+            // the change that was waiting for this: it is shown, with this cover, a moment from now
+            changeReady()
+            renderAod(s)
+            return
+        }
         val cover = s.artwork
         val move = TrackMotion.coverMove(cover != null && cover === shownCover, now - slideStartedAt)
         Log.i(MOTION, "cover arrived: $move")
@@ -799,36 +876,110 @@ class NowPlayingActivity : Activity() {
             }.start()
     }
 
-    /** Cross-slides to a new cover; the direction follows next/previous. */
+    /** Slides a new cover in on its own (a cover that came late, or none at all); the direction follows next/previous. */
     private fun showArtwork(bitmap: Bitmap?, direction: Int, animate: Boolean) {
+        if (animate) {
+            runShot(direction, null, true, bitmap, null)
+            return
+        }
+        shot?.cancel()
+        shot = null
         val outgoing = artFront
         val incoming = if (outgoing === artA) artB else artA
-        incoming.animate().cancel()
-        outgoing.animate().cancel()
         incoming.setImageBitmap(bitmap)
         lyricsArt.setImageBitmap(bitmap)
         shownCover = bitmap
         incoming.bringToFront()
         artFront = incoming
-        if (!animate) {
-            incoming.alpha = 1f
-            incoming.translationX = 0f
-            incoming.scaleX = 1f
-            incoming.scaleY = 1f
-            outgoing.alpha = 0f
-            return
+        incoming.alpha = 1f
+        incoming.translationX = 0f
+        outgoing.alpha = 0f
+        outgoing.translationX = 0f
+    }
+
+    private class Texts(val title: String, val artist: String, val album: String)
+
+    private fun applyTexts(texts: Texts) {
+        for ((view, text) in listOf(titleView to texts.title, artistView to texts.artist, albumView to texts.album)) {
+            view.tag = text
+            view.text = text
         }
-        slideStartedAt = SystemClock.elapsedRealtime()
-        val shift = dpf(ART_SHIFT_DP) * direction
-        incoming.alpha = 0f
-        incoming.translationX = shift
-        incoming.scaleX = 0.92f
-        incoming.scaleY = 0.92f
-        // No end action, listener or layer on these two: then the framework runs them on the render thread, where
-        // they keep moving smoothly even if the main thread is busy for a moment.
-        incoming.animate().alpha(1f).translationX(0f).scaleX(1f).scaleY(1f).setDuration(TrackMotion.SLIDE_MS)
-            .setInterpolator(DecelerateInterpolator(1.8f)).start()
-        outgoing.animate().alpha(0f).translationX(-shift * 0.6f).scaleX(0.92f).scaleY(0.92f).setDuration(ART_OUT_MS).start()
+        artistView.visibility = if (texts.artist.isBlank()) View.GONE else View.VISIBLE
+        albumView.visibility = if (texts.album.isBlank()) View.GONE else View.VISIBLE
+    }
+
+    /**
+     * The one motion of a song change. A single animator drives everything, so nothing can drift out of step with
+     * anything else: the new cover slides in over the old (which gives way a little more slowly, and both stay fully
+     * opaque, so the picture never dips into the background), the text turns over while it is out of sight and
+     * comes back line by line, and the colours move to the new cover's. [texts] is null when only the cover moves.
+     */
+    private fun runShot(direction: Int, texts: Texts?, coverChange: Boolean, cover: Bitmap?, colors: ArtworkColors?) {
+        shot?.end() // an earlier one lands where it was going before this one starts from there
+        val outgoing = artFront
+        val incoming = if (outgoing === artA) artB else artA
+        val span = artHolder.width.toFloat().coerceAtLeast(dpf(ART_DP.toFloat()))
+        if (coverChange) {
+            incoming.setImageBitmap(cover)
+            lyricsArt.setImageBitmap(cover)
+            shownCover = cover
+            incoming.alpha = 1f
+            incoming.translationX = span * direction
+            incoming.bringToFront()
+            artFront = incoming
+            slideStartedAt = SystemClock.elapsedRealtime()
+            artworkColors = colors ?: ArtworkColors.NEUTRAL
+            applyArtworkColors(artworkColors, animate = true, durationMs = TrackMotion.SHOT_MS)
+        }
+        val shift = dpf(TEXT_SHIFT_DP) * direction
+        val lines = listOf(titleView, artistView, albumView)
+        var turned = texts == null
+        val animator = ValueAnimator.ofFloat(0f, 1f)
+        shot = animator
+        animator.duration = TrackMotion.SHOT_MS
+        animator.interpolator = LinearInterpolator()
+        animator.addUpdateListener { animation ->
+            val p = animation.animatedValue as Float
+            if (coverChange) {
+                val e = TrackMotion.easeOut(p)
+                incoming.translationX = span * direction * (1f - e)
+                outgoing.translationX = -span * direction * 0.28f * e
+            }
+            if (texts != null) {
+                if (!turned && p >= TrackMotion.TEXT_SWAP_AT) {
+                    // everything of the old song is out of sight: the new text goes in, and the clock starts over
+                    turned = true
+                    applyTexts(texts)
+                    progressBar.setFraction(0f, false)
+                    lyricsProgress.setFraction(0f, false)
+                    updateProgress()
+                }
+                lines.forEachIndexed { i, view ->
+                    val (alpha, slide) = TrackMotion.textAt(p, i)
+                    view.alpha = alpha
+                    view.translationX = shift * slide
+                }
+            }
+        }
+        animator.addListener(object : AnimatorListenerAdapter() {
+            override fun onAnimationEnd(animation: Animator) {
+                if (coverChange) {
+                    outgoing.alpha = 0f
+                    outgoing.translationX = 0f
+                    incoming.translationX = 0f
+                }
+                if (texts != null) {
+                    if (!turned) applyTexts(texts)
+                    lines.forEach {
+                        it.alpha = 1f
+                        it.translationX = 0f
+                    }
+                }
+                if (shot === animation) shot = null
+                updateProgress()
+            }
+        })
+        animator.start()
     }
 
     // ---- colours
@@ -853,7 +1004,7 @@ class NowPlayingActivity : Activity() {
     }
 
     /** Moves the backdrop and the bars to [colors]; on black (minimal, black, blank) the backdrop stays pure black. */
-    private fun applyArtworkColors(colors: ArtworkColors, animate: Boolean) {
+    private fun applyArtworkColors(colors: ArtworkColors, animate: Boolean, durationMs: Long = PALETTE_MS) {
         artworkColors = colors
         val dark = presence.isDark
         animatePaletteTo(
@@ -861,10 +1012,11 @@ class NowPlayingActivity : Activity() {
             if (dark) Color.BLACK else colors.backdropBottom,
             colors.accent,
             animate,
+            durationMs,
         )
     }
 
-    private fun animatePaletteTo(top: Int, bottom: Int, accent: Int, animate: Boolean) {
+    private fun animatePaletteTo(top: Int, bottom: Int, accent: Int, animate: Boolean, durationMs: Long = PALETTE_MS) {
         paletteAnimator?.cancel()
         val fromTop = shownTop
         val fromBottom = shownBottom
@@ -878,7 +1030,8 @@ class NowPlayingActivity : Activity() {
         }
         val evaluator = ArgbEvaluator()
         paletteAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = PALETTE_MS
+            duration = durationMs
+            interpolator = DecelerateInterpolator(1.6f)
             addUpdateListener {
                 val p = it.animatedValue as Float
                 shownTop = evaluator.evaluate(p, fromTop, top) as Int
@@ -935,6 +1088,7 @@ class NowPlayingActivity : Activity() {
     }
 
     private fun updateProgress() {
+        if (changePending) return // the old song's time stays until the change is shown, then it is the new one's
         val s = latest
         val position = if (scrubTarget >= 0) scrubTarget else positionNow()
         if (position < 0) {
@@ -1481,8 +1635,6 @@ class NowPlayingActivity : Activity() {
         private const val TEXT_SHIFT_DP = 28f
         private const val TEXT_OUT_MS = 130L
         private const val TEXT_IN_MS = 300L
-        private const val ART_SHIFT_DP = 56f
-        private const val ART_OUT_MS = 380L
         private const val PALETTE_MS = 700L
         private const val ARTWORK_GRACE_MS = 1200L
 

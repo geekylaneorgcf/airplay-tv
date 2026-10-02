@@ -107,6 +107,14 @@
             android:foregroundServiceType="connectedDevice" />
 
         <receiver
+            android:name=".service.LauncherQueryReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="io.github.besliky.airplaytv.action.QUERY_NOW_PLAYING" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
             android:name=".service.BootReceiver"
             android:exported="false">
             <intent-filter>

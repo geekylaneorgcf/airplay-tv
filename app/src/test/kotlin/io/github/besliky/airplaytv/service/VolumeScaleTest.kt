@@ -43,4 +43,14 @@ class VolumeScaleTest {
         assertFalse(VolumeScale.sameGain(gainOfDb(-28.125f), gainOfDb(-30f)))
         assertFalse(VolumeScale.sameGain(0f, gainOfDb(-30f)))
     }
+
+    @Test
+    fun `remote steps move the slider and stop at the ends`() {
+        assertEquals(0.5f, VolumeScale.stepped(0.5f, 0, 16), 1e-6f)
+        assertEquals(0.5625f, VolumeScale.stepped(0.5f, 1, 16), 1e-6f)
+        assertEquals(0.4375f, VolumeScale.stepped(0.5f, -1, 16), 1e-6f)
+        assertEquals(1f, VolumeScale.stepped(0.95f, 5, 16), 0f)
+        // the old pin to silence: a system number stuck at 0 read as eight steps down, every look
+        assertEquals(0f, VolumeScale.stepped(0.7f, -8 * 16, 16), 0f)
+    }
 }

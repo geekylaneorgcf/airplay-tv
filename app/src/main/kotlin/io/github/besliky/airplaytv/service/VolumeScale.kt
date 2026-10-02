@@ -28,4 +28,8 @@ object VolumeScale {
         if (a <= 0f || b <= 0f) return a <= 0f && b <= 0f
         return abs(20f * log10(a / b)) < 0.05f
     }
+
+    /** The slider position [delta] steps from [level], on a slider of [steps] steps, held between 0 and 1. */
+    fun stepped(level: Float, delta: Int, steps: Int): Float =
+        (Math.round(level * steps) + delta).coerceIn(0, steps) / steps.toFloat()
 }

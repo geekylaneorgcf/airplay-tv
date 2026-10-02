@@ -1,6 +1,7 @@
 package io.github.besliky.airplaytv.ui
 
 import android.Manifest
+import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.SharedPreferences
@@ -15,6 +16,7 @@ import io.github.besliky.airplaytv.Settings
 import io.github.besliky.airplaytv.lg.TvMenuMode
 import io.github.besliky.airplaytv.lg.TvSettings
 import io.github.besliky.airplaytv.service.AccessibilitySetup
+import io.github.besliky.airplaytv.service.MenuKeyService
 import io.github.besliky.airplaytv.service.ReceiverService
 import io.github.besliky.airplaytv.service.ReceiverState
 import io.github.besliky.airplaytv.service.ReceiverState.Status
@@ -42,8 +44,8 @@ class MainActivity : SettingsPage() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (opensNowPlaying(intent)) {
-            openNowPlaying()
+        returnTarget(intent)?.let {
+            openPlayer(it)
             return
         }
         settings = Settings(this)
@@ -83,26 +85,32 @@ class MainActivity : SettingsPage() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        if (opensNowPlaying(intent)) {
-            openNowPlaying()
+        returnTarget(intent)?.let {
+            openPlayer(it)
             return
         }
         showPreviewIfRequested(intent)
     }
 
     /**
-     * Starting the app from the Home screen while a sender plays audio means "show me what is playing",
-     * so go straight to the player. The player's Menu key opens this page with [EXTRA_STAY] set.
+     * Starting the app from the Home screen while a sender plays means "show me what is playing", so go straight to
+     * the player (for audio) or to the picture (for screen mirroring and video). The player's Menu key opens this page
+     * with [EXTRA_STAY] set. The home screen's "AirPlay" chip starts the app the same way.
      */
-    private fun opensNowPlaying(intent: Intent?): Boolean {
-        if (intent == null || intent.action != Intent.ACTION_MAIN) return false
-        if (intent.getBooleanExtra(EXTRA_STAY, false) || intent.hasExtra(NowPlayingActivity.EXTRA_PREVIEW)) return false
+    private fun returnTarget(intent: Intent?): Class<out Activity>? {
+        if (intent == null || intent.action != Intent.ACTION_MAIN) return null
+        if (intent.getBooleanExtra(EXTRA_STAY, false) || intent.hasExtra(NowPlayingActivity.EXTRA_PREVIEW)) return null
         val s = ReceiverState.current
-        return s.status == Status.CONNECTED && s.audioActive && !s.videoActive
+        if (s.status != Status.CONNECTED) return null
+        return when {
+            s.videoActive -> MirrorActivity::class.java
+            s.audioActive -> NowPlayingActivity::class.java
+            else -> null
+        }
     }
 
-    private fun openNowPlaying() {
-        startActivity(Intent(this, NowPlayingActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP))
+    private fun openPlayer(target: Class<out Activity>) {
+        startActivity(Intent(this, target).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP))
         finish()
     }
 
@@ -165,7 +173,7 @@ class MainActivity : SettingsPage() {
             this,
             getString(R.string.dialog_sleep_title),
             getString(R.string.dialog_sleep_intro),
-            AccessibilitySetup.commands(this, SleepService.component(packageName)),
+            AccessibilitySetup.commands(this, MenuKeyService.component(packageName)),
             getString(R.string.dialog_sleep_outro),
         )
     }
@@ -182,25 +190,34 @@ class MainActivity : SettingsPage() {
     private fun tvMenuValue(): String = when (TvSettings.state(settings)) {
         TvSettings.State.OFF -> getString(R.string.value_off)
         TvSettings.State.NEEDS_SETUP -> getString(R.string.value_needs_setup)
-        TvSettings.State.READY -> getString(R.string.value_on)
+        TvSettings.State.READY ->
+            getString(if (MenuKeyService.isEnabled) R.string.value_tv_everywhere else R.string.value_tv_player)
     }
 
-    /** Off: set the button up. Set up: try it, set it up again, use it in every app, or turn it off. */
+    /**
+     * Off: set the button up. Set up: a list of things to do, none of them a choice that stays selected: try it, see
+     * (or switch on) the button in every app, set it up again, turn it off.
+     */
     private fun configureTvMenu() {
         if (TvSettings.state(settings) != TvSettings.State.READY) {
             TvPairing.start(this, settings) { bindRows() }
             return
         }
+        val everywhere = MenuKeyService.isEnabled
         val items = listOf(
             getString(R.string.tv_menu_try),
-            getString(R.string.tv_menu_every_app),
+            getString(if (everywhere) R.string.tv_menu_every_app_on else R.string.tv_menu_every_app_off),
             getString(R.string.tv_menu_pair_again),
             getString(R.string.tv_menu_turn_off),
         )
-        Dialogs.choose(this, R.string.tv_menu_title, items, 0) { index ->
+        Dialogs.actions(this, R.string.tv_menu_title, items) { index ->
             when (index) {
                 0 -> TvMenuMode.toggle(this)
-                1 -> TvPairing.showEveryAppSetup(this)
+                1 -> if (everywhere) {
+                    Dialogs.message(this, getString(R.string.tv_menu_everywhere_title), getString(R.string.tv_menu_everywhere_message))
+                } else {
+                    TvPairing.showEveryAppSetup(this)
+                }
                 2 -> {
                     settings.forgetTv()
                     TvPairing.start(this, settings) { bindRows() }

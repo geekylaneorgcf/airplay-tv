@@ -385,13 +385,20 @@ object Dialogs {
     }
 
     /** A short list to pick one entry from; the focus starts on the current choice. */
-    fun choose(activity: Activity, title: Int, items: List<String>, selected: Int, onChoose: (Int) -> Unit) {
+    fun choose(activity: Activity, title: Int, items: List<String>, selected: Int, onChoose: (Int) -> Unit) =
+        choose(activity, title, items, selected, true, onChoose)
+
+    /** A list of actions, with no mark beside any of them: [first] only says which one has the focus when it opens. */
+    fun actions(activity: Activity, title: Int, items: List<String>, first: Int = 0, onChoose: (Int) -> Unit) =
+        choose(activity, title, items, first, false, onChoose)
+
+    private fun choose(activity: Activity, title: Int, items: List<String>, selected: Int, marked: Boolean, onChoose: (Int) -> Unit) {
         lateinit var dialog: Dialog
         val rows = ArrayList<View>()
         val list = column(activity) {
             items.forEachIndexed { i, label ->
                 val row = TextView(activity).apply {
-                    text = if (i == selected) "✓  $label" else "     $label"
+                    text = if (!marked) label else if (i == selected) "✓  $label" else "     $label"
                     setTextSize(TypedValue.COMPLEX_UNIT_SP, 19f)
                     typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                     setPadding(dp(activity, 20), dp(activity, 14), dp(activity, 20), dp(activity, 14))

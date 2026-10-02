@@ -66,6 +66,21 @@
   minus what is still queued (ring and output buffer), keeps the median of the last measurements and shifts the lyrics by it. New
   setting Lyrics Timing (Automatic, or 0.25 s steps earlier or later up to 2 s) for songs cut differently from their lyrics. The
   log says what was measured (`sync:` lines).
+- Volume stuck at 0 with the TV on HDMI-CEC: with CEC on, the stick treats the HDMI output as a fixed-volume device and ignores
+  every change of the system volume, so the number the receiver reads as "a remote key was pressed" stayed at 0, and "eight steps
+  down" was read at every look, pinning the receiver's volume to silence whatever the phone's slider said. The watch now checks that
+  it can park the system volume in the middle and stays out of it when it cannot (the TV's own volume is then the remote's, the
+  phone's slider is the receiver's).
+- Song changes are one motion. A skip arrives over a second, and each step still moved something (the title, the progress, the
+  album, then the cover over the old one as a see-through overlay, then the backdrop's colours). The change is now held until the
+  cover is in, then everything moves once, together, for 0.64 s: the new cover slides in over the old (both opaque, so the picture
+  never dips), the three lines of text leave and come back line by line, the progress starts over and the colours move to the new
+  cover's. A cover that arrives first, or the same album's, joins the same motion; a cover that never comes is given 1.1 s.
+- Sleep After Music works with the Menu button service as well (one accessibility switch for both), and the setup commands it shows
+  are that service's. The TV Settings Button page is a list of things to do instead of a list with a tick on its first line, shows
+  whether the Menu button works in every app, and the setting says "On, in every app" or "On, in the player only".
+- The "AirPlay" chip on the home screen app (tvhome): the receiver tells tvhome, and nothing else, when music or a mirrored screen
+  starts and stops, and starting AirPlay TV from the home screen while something plays opens the player (or the mirrored picture).
 
 ## [0.2.0] - fork
 

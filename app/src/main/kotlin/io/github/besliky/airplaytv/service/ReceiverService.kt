@@ -84,6 +84,9 @@ class ReceiverService : Service(), NativeBridge.Listener {
     private var lyricsToken = 0
     private val lyricsRunnable = Runnable { requestLyrics() }
 
+    /** Tells the home screen app when something starts or stops playing (see [LauncherLink]). */
+    private val launcherListener: (ReceiverState.Snapshot) -> Unit = { LauncherLink.onState(this, it) }
+
     /**
      * Fire OS handles the remote's volume and mute keys itself and never lets an app see them, but
      * it moves the system music volume, and on HDMI that changes only a number: the audio stays at
@@ -91,6 +94,12 @@ class ReceiverService : Service(), NativeBridge.Listener {
      * number as the input: each step away from the middle is one step of the receiver's own volume,
      * which is applied for real, and the system number is put back in the middle so the buttons
      * work at both ends. It is restored when the session ends.
+     *
+     * That only works while the system lets the number move. With HDMI-CEC on, the stick hands the volume to the
+     * TV and calls the output a fixed-volume device: it ignores every change, so the number stays wherever it was
+     * (often 0). Read as a key press that is "eight steps down" at every look, and the receiver's volume was
+     * pinned to silence. So the watch starts by checking that the number can be parked in the middle, and when it
+     * cannot, it stays out of it: the TV's own volume is the remote's, the phone's slider is the receiver's.
      */
     private val volumeWatch = object : Runnable {
         override fun run() {
@@ -108,6 +117,11 @@ class ReceiverService : Service(), NativeBridge.Listener {
                 am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_UNMUTE, 0)
             }
             am.setStreamVolume(AudioManager.STREAM_MUSIC, STREAM_CENTER, 0)
+            if (am.getStreamVolume(AudioManager.STREAM_MUSIC) != STREAM_CENTER) {
+                Log.i(SESSION, "the system volume cannot be moved here (the TV controls it): the remote's volume keys are the TV's")
+                savedStreamIndex = -1
+                return
+            }
         } catch (e: RuntimeException) {
             Log.w(SESSION, "cannot read the system volume", e)
             return
@@ -145,10 +159,16 @@ class ReceiverService : Service(), NativeBridge.Listener {
                     setVolumeLevel(levelBeforeMute.coerceAtLeast(1f / OUTPUT_STEPS))
                 }
             } else if (index != STREAM_CENTER) {
-                val next = (Math.round(currentVolume() * OUTPUT_STEPS) + (index - STREAM_CENTER))
-                    .coerceIn(0, OUTPUT_STEPS) / OUTPUT_STEPS.toFloat()
                 am.setStreamVolume(AudioManager.STREAM_MUSIC, STREAM_CENTER, 0)
-                setVolumeLevel(next)
+                if (am.getStreamVolume(AudioManager.STREAM_MUSIC) != STREAM_CENTER) {
+                    // The output turned into one the system will not move (the TV came on over CEC): that number is
+                    // not a key press, so leave the volume alone and stop looking until the next session.
+                    Log.i(SESSION, "the system volume stopped moving: the TV controls it now")
+                    handler.removeCallbacks(volumeWatch)
+                    savedStreamIndex = -1
+                    return
+                }
+                setVolumeLevel(VolumeScale.stepped(currentVolume(), index - STREAM_CENTER, OUTPUT_STEPS))
             }
         } catch (e: RuntimeException) {
             Log.w(SESSION, "volume watch failed", e)
@@ -265,6 +285,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
         network = NetworkMonitor(this, ::onNetworkChanged)
         network.start()
         settings.registerListener(prefsListener)
+        ReceiverState.observe(launcherListener)
         registerReceiver(screenReceiver, IntentFilter(Intent.ACTION_SCREEN_ON))
         registerReceiver(dreamReceiver, IntentFilter(Intent.ACTION_DREAMING_STARTED))
         screenReceiverRegistered = true
@@ -294,6 +315,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
         stopReceiver()
         network.stop()
         settings.unregisterListener(prefsListener)
+        ReceiverState.remove(launcherListener)
         if (screenReceiverRegistered) {
             unregisterReceiver(screenReceiver)
             unregisterReceiver(dreamReceiver)
@@ -789,6 +811,8 @@ class ReceiverService : Service(), NativeBridge.Listener {
         coverExecutor.execute {
             val bitmap = decodeArtwork(data) ?: return@execute
             val colors = ArtworkColors.from(bitmap)
+            // have the render thread turn it into a texture now, here, so the first frame of the slide does not wait for it
+            bitmap.prepareToDraw()
             handler.post {
                 if (token != coverToken) return@post // a newer cover came meanwhile, or the session ended
                 Log.i(SESSION, "new cover (${data.size} bytes)")

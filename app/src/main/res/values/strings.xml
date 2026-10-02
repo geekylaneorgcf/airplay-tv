@@ -94,7 +94,7 @@
     <string name="value_minutes">%1$d min</string>
     <string name="value_needs_setup">Needs setup</string>
     <string name="dialog_sleep_title">Sleep After Music</string>
-    <string name="dialog_sleep_intro">When AirPlay turns this TV on, it can turn it off again a few minutes after the music stops. Android only allows that through an accessibility service, so it needs a one-time setup from a computer. Run these two commands:</string>
+    <string name="dialog_sleep_intro">When AirPlay turns this TV on, it can turn it off again a few minutes after the music stops. Android only allows that through an accessibility service, so it needs a one-time setup from a computer. It is the same switch as the Menu button in every app, so that comes on with it. Run these two commands:</string>
     <string name="dialog_sleep_outro">The commands keep any accessibility services that are already on. The service does not read the screen.</string>
     <string name="sleep_service_label" translatable="false">AirPlay TV sleep</string>
     <string name="sleep_service_description">Lets AirPlay TV turn the screen off a few minutes after the music stops. It does not read the screen or see what you do.</string>
@@ -114,6 +114,12 @@
     <string name="tv_menu_pair_again">Set Up Again</string>
     <string name="tv_menu_every_app">Use In Every App</string>
     <string name="tv_menu_turn_off">Turn Off</string>
+    <string name="tv_menu_every_app_on">Menu Button In Every App: On</string>
+    <string name="tv_menu_every_app_off">Menu Button In Every App: Off (Shows How)</string>
+    <string name="tv_menu_everywhere_title">Menu button in every app</string>
+    <string name="tv_menu_everywhere_message">It is on: the Menu button opens the TV’s settings in every app, not only in the player. To give the button back to the apps, choose Turn Off.</string>
+    <string name="value_tv_everywhere">On, in every app</string>
+    <string name="value_tv_player">On, in the player only</string>
     <string name="tv_pairing_title">Connecting to your TV</string>
     <string name="tv_pairing_looking">Looking for your LG TV on the network…</string>
     <string name="tv_pairing_connecting">Connecting to the TV at %1$s…</string>
@@ -132,7 +138,7 @@
     <string name="tv_pairing_unreachable">Could not reach the TV at %1$s. Is it on, and on the same network?</string>
     <string name="tv_pairing_failed">The TV did not answer as expected.</string>
     <string name="menu_service_label" translatable="false">AirPlay TV menu button</string>
-    <string name="menu_service_description">Lets the Menu button open the TV’s quick settings in every app. It looks at the Menu key only; it does not read the screen or see what you do.</string>
+    <string name="menu_service_description">Lets the Menu button open the TV’s quick settings in every app, and lets AirPlay TV turn the screen off a few minutes after the music stops. It looks at the Menu key only; it does not read the screen or see what you do.</string>
     <string name="menu_setup_title">Menu button in every app</string>
     <string name="menu_setup_intro">So that the Menu button opens the TV’s settings in any app, and not only in the player, it has to be taken before the app sees it. Android only allows that through an accessibility service, switched on once from a computer. Run these two commands:</string>
     <string name="menu_setup_outro">The commands keep any accessibility services that are already on. The service looks at the Menu key only, reads no screen content, and lets every key through while the TV Settings Button is off.</string>

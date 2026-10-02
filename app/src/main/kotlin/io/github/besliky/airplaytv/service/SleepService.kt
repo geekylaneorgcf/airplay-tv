@@ -11,7 +11,8 @@ import android.view.accessibility.AccessibilityEvent
  * with a signature permission). It does not read the screen and listens to no events; it only exists
  * so that [sleepNow] can ask the system to lock the screen, which on a TV stick means "go to sleep".
  *
- * It is off until the user enables it once from a computer, see the Sleep After Music setting.
+ * The Menu button service can do the same, so one switch serves both: whichever of the two is on is used,
+ * and the setup this app shows is the Menu button service's. This one stays for anyone who already enabled it.
  */
 class SleepService : AccessibilityService() {
 
@@ -33,8 +34,8 @@ class SleepService : AccessibilityService() {
         @Volatile
         private var instance: SleepService? = null
 
-        /** True while the user has switched the service on. */
-        val isEnabled: Boolean get() = instance != null
+        /** True while the user has switched this service or the Menu button service on. */
+        val isEnabled: Boolean get() = instance != null || MenuKeyService.isEnabled
 
         /**
          * The service's name as `enabled_accessibility_services` takes it, in the short form Android
@@ -45,8 +46,8 @@ class SleepService : AccessibilityService() {
 
         /** Puts the device to sleep: the screen turns off and the TV follows over HDMI-CEC. */
         fun sleepNow(): Boolean {
-            val service = instance ?: return false
             if (Build.VERSION.SDK_INT < 28) return false
+            val service = instance ?: return MenuKeyService.sleepNow()
             return service.performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN)
         }
     }
