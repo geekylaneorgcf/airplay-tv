@@ -21,6 +21,15 @@
 | Back to the player | Three ways, no iPhone needed. Start the app from the Home screen while music plays and it opens the player instead of the settings. While music plays and the TV is left alone, the player takes over from the system screensaver (starting already in its minimal, dim stage). And pressing play, pause, next or previous on the remote while the player is hidden shows it for six seconds, then returns to what was on screen (any key keeps it). The "Return To Player" setting turns the last two off. The remote's Menu key opens the settings from the player. |
 | Sleep after music (opt-in) | Turns the TV off again a few minutes after the music stops, only if AirPlay woke it and nobody touched the remote. Needs a one-time accessibility-service setup, see below. |
 | Photos | The receiver already advertised photo support (inherited feature bits) but refused every HTTP request. It now handles `GET /server-info`, `POST /reverse`, `PUT /photo` with the asset cache (`cacheOnly`/`displayCached`), `POST /stop`. |
+| Wake the TV | With an LG paired, a sender that connects while the TV is off makes the receiver wake it over the network (Wake-on-LAN; the TV's "Turn on via Wi-Fi" must be on), put it on this stick's input and ask the phone to wait with the music until the picture is up. |
+| TV volume, music mode, smart pause | The TV's own volume follows the phone's slider and the remote's volume keys when the TV lets it move; the TV's screen can go off while only music plays; the phone's music pauses when the TV is switched to another input. Settings, TV Features. |
+| Volume limits | A maximum, a lower maximum at night, and a start level, so a song never begins loud. Settings, Volume Limits. |
+| Sound | Bass, treble, a loudness boost and a night mode (the system's audio effects on the music's track). Settings, Sound. |
+| Second phone | A second phone can take over (the default), be turned away, or be asked about on the TV. |
+| Self-check | Once a minute the receiver checks that its port answers and its name is announced and mends what is not; Advanced, Check The Receiver says why a phone might not see the TV. |
+| Visualizer, resting screen, seek bubble | A calm row of bars along the bottom of the player, a dimmer, slower screen after a minute of pause, and the time a seek will land on. |
+| AirPlay video | The cast button in Safari, YouTube and similar apps gives the receiver the address of a video, which a new screen plays (HLS and files over https); the phone reads where it is and sets play, pause and position. Advanced, AirPlay Video. |
+| For the home screen | The broadcast to TV Home carries the phone's name, the song's length and place, and a small cover, and TV Home's small player sends play, pause, next and previous back. |
 | Signing | Releases are signed with a stable key so updates install over the previous one with `adb install -r`. |
 
 ### Settings (open the app on the TV)
@@ -65,8 +74,8 @@ backdrop) to compare banding.
   speaker icon: only the audio service is published, under a model iOS does not know (the way shairport-sync is drawn as a speaker),
   so only music works, not screen mirroring or photos. It switches itself back to Apple TV after 30 minutes unless music has started
   from an iPhone by then (that confirms it). Whether iOS accepts it can only be seen on a real iPhone.
-- YouTube and other apps' in-app **AirPlay video** (the cast button) is not supported (`POST /play` is refused and logged);
-  Screen Mirroring is. Audio-only AirPlay from music apps is the main use.
+- In-app **AirPlay video** (the cast button) is played by the receiver itself now (Advanced, AirPlay Video), but it is unverified on a
+  phone, only https addresses work, and protected content (FairPlay) does not; Screen Mirroring is the way for those. Audio-only AirPlay from music apps is the main use.
 - Photos: implemented from the unofficial protocol notes and a loopback test; not yet verified against every iOS version. Slideshows are refused.
 - Apps that forbid screen recording (Netflix etc.) mirror black.
 
