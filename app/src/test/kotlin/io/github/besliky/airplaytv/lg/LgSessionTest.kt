@@ -39,6 +39,7 @@ class LgSessionTest {
 
         override fun close() {
             closed = true
+            inbox.add("{}") // wakes a reader that is waiting, as closing a real socket does
         }
     }
 
