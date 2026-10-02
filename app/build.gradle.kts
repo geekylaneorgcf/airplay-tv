@@ -88,6 +88,10 @@ android {
         }
         debug {
             isJniDebuggable = true
+            // a debug build installs next to the release one (and under its own name on the network), so a build can be tried on a
+            // device without replacing the app that is in use, with its settings and pairings
+            applicationIdSuffix = ".dev"
+            versionNameSuffix = "-dev"
         }
     }
 

@@ -20,7 +20,7 @@ class Settings(context: Context) {
         context.applicationContext.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
     var deviceName: String
-        get() = sanitizeName(prefs.getString(KEY_NAME, null)) ?: DEFAULT_NAME
+        get() = sanitizeName(prefs.getString(KEY_NAME, null)) ?: (if (BuildConfig.DEBUG) "$DEFAULT_NAME Dev" else DEFAULT_NAME)
         set(value) = prefs.edit().putString(KEY_NAME, sanitizeName(value) ?: DEFAULT_NAME).apply()
 
     /** Look up lyrics on lrclib.net for the playing song. Off by default: it is the only thing that uses the internet. */

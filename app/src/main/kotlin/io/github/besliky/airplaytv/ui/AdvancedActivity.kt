@@ -24,6 +24,7 @@ class AdvancedActivity : SettingsPage() {
     private lateinit var logsRow: Row
     private lateinit var pairedRow: Row
     private lateinit var appearRow: Row
+    private lateinit var videoRow: Row
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -50,6 +51,10 @@ class AdvancedActivity : SettingsPage() {
             settings.verboseLogging = !settings.verboseLogging
             bind()
         }
+        videoRow = addRow(getString(R.string.setting_airplay_video)) {
+            settings.airplayVideo = !settings.airplayVideo
+            bind()
+        }
         addRow(getString(R.string.setting_check)) { runCheck() }.navigates(true)
         appearRow = addRow(getString(R.string.setting_appear)) { toggleAppearance() }
         addRow(getString(R.string.setting_diagnostics)) { exportDiagnostics() }.navigates(true)
@@ -70,6 +75,7 @@ class AdvancedActivity : SettingsPage() {
         fpsRow.value(getString(R.string.value_fps, settings.frameRate))
         overlayRow.value(onOff(settings.performanceOverlay))
         logsRow.value(onOff(settings.verboseLogging))
+        videoRow.value(onOff(settings.airplayVideo))
         pairedRow.value(paired.count.toString())
         appearRow.value(
             when {

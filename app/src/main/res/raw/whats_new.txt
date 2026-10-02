@@ -4,3 +4,4 @@ Sound: bass, treble, loudness and a night mode (Settings, Sound).
 A second phone can be turned away, or you are asked (Settings, When A Second Phone Plays).
 The receiver checks itself and restarts what has gone quiet; Advanced, Check The Receiver says why a phone cannot see this TV.
 A calm visualizer on the Now Playing screen, a resting screen while paused, and a time bubble when you seek.
+AirPlay video: the cast button in apps such as Safari plays the video on this TV (Settings, Advanced).
