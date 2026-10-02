@@ -64,7 +64,7 @@ object LauncherLink {
     fun stateOf(s: ReceiverState.Snapshot): State {
         if (s.status != ReceiverState.Status.CONNECTED) return State(Kind.NONE, "", "")
         return when {
-            s.videoActive -> State(Kind.VIDEO, "", "")
+            s.videoActive || s.urlVideo -> State(Kind.VIDEO, "", "")
             s.audioActive -> State(Kind.AUDIO, s.title, s.artist, s.playing, s.clientName.orEmpty(), s.artworkSeq, s.durationMs)
             else -> State(Kind.NONE, "", "")
         }

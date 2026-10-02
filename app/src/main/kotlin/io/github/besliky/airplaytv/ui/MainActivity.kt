@@ -121,6 +121,7 @@ class MainActivity : SettingsPage() {
         val s = ReceiverState.current
         if (s.status != Status.CONNECTED) return null
         return when {
+            s.urlVideo -> VideoPlayerActivity::class.java
             s.videoActive -> MirrorActivity::class.java
             s.audioActive -> NowPlayingActivity::class.java
             else -> null

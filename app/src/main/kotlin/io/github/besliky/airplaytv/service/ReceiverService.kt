@@ -42,6 +42,7 @@ import io.github.besliky.airplaytv.ui.MirrorActivity
 import io.github.besliky.airplaytv.ui.NowPlayingActivity
 import io.github.besliky.airplaytv.ui.PhotoActivity
 import io.github.besliky.airplaytv.ui.TakeoverActivity
+import io.github.besliky.airplaytv.ui.VideoPlayerActivity
 import java.util.Calendar
 import java.util.concurrent.Executors
 import java.util.zip.CRC32
@@ -364,6 +365,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
             }
         }
         UserKeys.listener = { lg.userKey() }
+        VideoPlayback.onScreenEnded = { handler.post { endUrlVideo(bySender = false) } }
         dacp = DacpClient(this).also { RemoteControl.client = it }
         network = NetworkMonitor(this, ::onNetworkChanged)
         network.start()
@@ -407,6 +409,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
         if (NativeBridge.listener === this) NativeBridge.listener = null
         stopVolumeWatch()
         UserKeys.listener = null
+        VideoPlayback.onScreenEnded = null
         lg.shutdown()
         effects.release()
         healthExecutor.shutdownNow()
@@ -470,6 +473,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
             settings.deviceName.toByteArray(Charsets.UTF_8), id.deviceId, id.publicId, seed,
             settings.requirePin, DEFAULT_PORT, mode.width, mode.height, settings.frameRate, mode.hevc,
             "", "", // the receiver's own identity, an Apple TV: a different model string stops iOS from starting sessions
+            settings.airplayVideo,
         )
         seed.fill(0)
         if (port <= 0) {
@@ -874,6 +878,56 @@ class ReceiverService : Service(), NativeBridge.Listener {
         ReceiverState.update { it.copy(videoActive = true) }
         lg.videoStarted()
         showPlayback()
+    }
+
+    // ---- AirPlay video: the sender gives the address of a video and this receiver plays it
+
+    override fun onVideoPlay(url: String, startSeconds: Double, startFraction: Double) {
+        Log.i(SESSION, "AirPlay video from ${VideoPlayback.hostOf(url)}")
+        if (!ReceiverState.current.urlVideo) {
+            wakeDisplay()
+            acquireSessionLocks()
+            lg.sessionStarted(holdPhone = false)
+        }
+        ReceiverState.update { it.copy(urlVideo = true, status = Status.CONNECTED, clientName = it.clientName ?: "iPhone") }
+        val intent = Intent(this, VideoPlayerActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            .putExtra(VideoPlayerActivity.EXTRA_URL, url)
+            .putExtra(VideoPlayerActivity.EXTRA_START, startSeconds)
+            .putExtra(VideoPlayerActivity.EXTRA_FRACTION, startFraction)
+        try {
+            startActivity(intent)
+        } catch (e: RuntimeException) {
+            Log.w(SESSION, "cannot open the video screen", e)
+        }
+        enterForeground(statusText())
+    }
+
+    override fun onVideoRate(rate: Double) {
+        VideoPlayback.controller?.setRate(rate)
+    }
+
+    override fun onVideoScrub(seconds: Double) {
+        VideoPlayback.controller?.seekTo(seconds)
+    }
+
+    override fun onVideoEnd() = endUrlVideo(bySender = true)
+
+    /** The video is over: the sender said so ([bySender]), or its screen was left. */
+    private fun endUrlVideo(bySender: Boolean) {
+        if (!ReceiverState.current.urlVideo) return
+        Log.i(SESSION, "AirPlay video ended${if (bySender) "" else " (the screen was left)"}")
+        if (bySender) {
+            VideoPlayback.controller?.stop()
+        } else if (NativeBridge.loaded) {
+            NativeBridge.nativeSetPlayback(0.0, 0.0, 0.0, false)
+        }
+        ReceiverState.update { it.copy(urlVideo = false, clientName = if (it.audioActive || it.videoActive) it.clientName else null) }
+        if (!ReceiverState.current.audioActive && !ReceiverState.current.videoActive) {
+            releaseSessionLocks()
+            lg.sessionEnded()
+        }
+        if (restartPending && ReceiverState.current.clientName == null) restartReceiver() else updateIdleState()
     }
 
     /** A second phone was turned away because the first is kept: say so, or, when the owner wants to be asked, ask. */

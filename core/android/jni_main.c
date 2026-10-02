@@ -59,6 +59,10 @@ static struct {
     jmethodID photo;
     jmethodID photo_stop;
     jmethodID session_blocked;
+    jmethodID video_play;
+    jmethodID video_rate;
+    jmethodID video_scrub;
+    jmethodID video_end;
 } g_cb;
 
 static pthread_mutex_t g_server_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -196,6 +200,41 @@ static void ev_session_blocked(void *ctx, const char *name) {
     (*env)->CallStaticVoidMethod(env, g_bridge, g_cb.session_blocked, n);
     check_exception(env);
     (*env)->DeleteLocalRef(env, n);
+}
+
+static void ev_video_play(void *ctx, const char *url, double start_seconds, double start_fraction) {
+    (void) ctx;
+    JNIEnv *env = get_env();
+    if (!env) {
+        return;
+    }
+    jbyteArray u = utf8_bytes(env, url);
+    (*env)->CallStaticVoidMethod(env, g_bridge, g_cb.video_play, u, (jdouble) start_seconds, (jdouble) start_fraction);
+    check_exception(env);
+    (*env)->DeleteLocalRef(env, u);
+}
+
+static void ev_video_rate(void *ctx, double rate) {
+    (void) ctx;
+    JNIEnv *env = get_env();
+    if (env) {
+        (*env)->CallStaticVoidMethod(env, g_bridge, g_cb.video_rate, (jdouble) rate);
+        check_exception(env);
+    }
+}
+
+static void ev_video_scrub(void *ctx, double seconds) {
+    (void) ctx;
+    JNIEnv *env = get_env();
+    if (env) {
+        (*env)->CallStaticVoidMethod(env, g_bridge, g_cb.video_scrub, (jdouble) seconds);
+        check_exception(env);
+    }
+}
+
+static void ev_video_end(void *ctx) {
+    (void) ctx;
+    call_void(g_cb.video_end);
 }
 
 static void ev_session_ended(void *ctx) {
@@ -424,7 +463,7 @@ static bool copy_bytes(JNIEnv *env, jbyteArray arr, uint8_t *out, size_t len) {
 
 static jint JNICALL n_start(JNIEnv *env, jclass cls, jbyteArray name, jbyteArray device_id, jstring public_id,
                             jbyteArray seed, jboolean require_pin, jint port, jint width, jint height, jint fps,
-                            jboolean hevc, jstring model, jstring srcvers) {
+                            jboolean hevc, jstring model, jstring srcvers, jboolean video) {
     (void) cls;
     airplay_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
@@ -468,6 +507,7 @@ static jint JNICALL n_start(JNIEnv *env, jclass cls, jbyteArray name, jbyteArray
     cfg.display_height = height;
     cfg.display_fps = fps;
     cfg.hevc = hevc;
+    cfg.video = video;
 
     airplay_events_t ev = {
         .ctx = NULL,
@@ -482,6 +522,10 @@ static jint JNICALL n_start(JNIEnv *env, jclass cls, jbyteArray name, jbyteArray
         .photo = ev_photo,
         .photo_stop = ev_photo_stop,
         .session_blocked = ev_session_blocked,
+        .video_play = ev_video_play,
+        .video_rate = ev_video_rate,
+        .video_scrub = ev_video_scrub,
+        .video_end = ev_video_end,
     };
 
     pthread_mutex_lock(&g_server_lock);
@@ -694,6 +738,14 @@ static jboolean JNICALL n_session_active(JNIEnv *env, jclass cls) {
     return (jboolean) active;
 }
 
+static void JNICALL n_set_playback(JNIEnv *env, jclass cls, jdouble duration, jdouble position, jdouble rate, jboolean ready) {
+    (void) env;
+    (void) cls;
+    pthread_mutex_lock(&g_server_lock);
+    airplay_server_set_playback(g_server, duration, position, rate, ready);
+    pthread_mutex_unlock(&g_server_lock);
+}
+
 static void JNICALL n_set_takeover(JNIEnv *env, jclass cls, jint policy) {
     (void) env;
     (void) cls;
@@ -705,7 +757,7 @@ static void JNICALL n_set_takeover(JNIEnv *env, jclass cls, jint policy) {
 static const JNINativeMethod kMethods[] = {
     { "nativeSetLogLevel", "(I)V", (void *) n_set_log_level },
     { "nativeLog", "(IILjava/lang/String;)V", (void *) n_log },
-    { "nativeStart", "([B[BLjava/lang/String;[BZIIIIZLjava/lang/String;Ljava/lang/String;)I", (void *) n_start },
+    { "nativeStart", "([B[BLjava/lang/String;[BZIIIIZLjava/lang/String;Ljava/lang/String;Z)I", (void *) n_start },
     { "nativeStop", "()V", (void *) n_stop },
     { "nativePublicKey", "()Ljava/lang/String;", (void *) n_public_key },
     { "nativeTxtRecords", "(Z)[Ljava/lang/String;", (void *) n_txt_records },
@@ -718,6 +770,7 @@ static const JNINativeMethod kMethods[] = {
     { "nativeLogHistory", "()Ljava/lang/String;", (void *) n_log_history },
     { "nativeSessionActive", "()Z", (void *) n_session_active },
     { "nativeSetTakeover", "(I)V", (void *) n_set_takeover },
+    { "nativeSetPlayback", "(DDDZ)V", (void *) n_set_playback },
 };
 
 JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *reserved) {
@@ -757,6 +810,10 @@ JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *reserved) {
     g_cb.photo = (*env)->GetStaticMethodID(env, g_bridge, "onPhoto", "([B[B)V");
     g_cb.photo_stop = (*env)->GetStaticMethodID(env, g_bridge, "onPhotoStop", "()V");
     g_cb.session_blocked = (*env)->GetStaticMethodID(env, g_bridge, "onSessionBlocked", "([B)V");
+    g_cb.video_play = (*env)->GetStaticMethodID(env, g_bridge, "onVideoPlay", "([BDD)V");
+    g_cb.video_rate = (*env)->GetStaticMethodID(env, g_bridge, "onVideoRate", "(D)V");
+    g_cb.video_scrub = (*env)->GetStaticMethodID(env, g_bridge, "onVideoScrub", "(D)V");
+    g_cb.video_end = (*env)->GetStaticMethodID(env, g_bridge, "onVideoEnd", "()V");
     if ((*env)->ExceptionCheck(env)) {
         (*env)->ExceptionClear(env);
         return JNI_ERR;

@@ -34,6 +34,7 @@ typedef struct {
     char model[24];             /* "model" / "am" in the advertisement, e.g. "AppleTV3,2"; empty = AIRPLAY_MODEL.
                                  * An iPhone draws the AirPlay icon from it. */
     char srcvers[16];           /* advertised source version; empty = AIRPLAY_SOURCE_VERSION */
+    bool video;                 /* advertise AirPlay video (the sender gives a URL and the receiver plays it) */
 } airplay_config_t;
 
 typedef struct {
@@ -61,6 +62,15 @@ typedef struct {
     void (*photo_stop)(void *ctx);
     /* A second sender asked to start a session while one is playing and was turned away (see airplay_server_set_takeover). Optional. */
     void (*session_blocked)(void *ctx, const char *client_name);
+    /* AirPlay video: the sender asks to play the stream at url (HLS or a file, http or https). It starts at start_seconds, or, when
+     * that is negative, at start_fraction (0..1) of its length. Optional. */
+    void (*video_play)(void *ctx, const char *url, double start_seconds, double start_fraction);
+    /* The sender sets the playback rate: 0 pauses, 1 plays. */
+    void (*video_rate)(void *ctx, double rate);
+    /* The sender moves to a place in the video. */
+    void (*video_scrub)(void *ctx, double seconds);
+    /* The video session is over (POST /stop, or the sender's event connection closed). */
+    void (*video_end)(void *ctx);
 } airplay_events_t;
 
 typedef struct {
@@ -77,6 +87,9 @@ void airplay_server_destroy(airplay_server_t *s);
 
 /* Ends the current session from the receiver side (e.g. the user pressed Back). */
 void airplay_server_disconnect(airplay_server_t *s);
+
+/* What the player reports about the video that is playing, read when the sender asks (GET /playback-info, GET /scrub). */
+void airplay_server_set_playback(airplay_server_t *s, double duration, double position, double rate, bool ready);
 
 /* What happens when another sender starts a session while one is playing: AIRPLAY_TAKEOVER_REPLACE (the default) ends the
  * current session for it; AIRPLAY_TAKEOVER_KEEP turns the newcomer away (403) and reports it with session_blocked. */

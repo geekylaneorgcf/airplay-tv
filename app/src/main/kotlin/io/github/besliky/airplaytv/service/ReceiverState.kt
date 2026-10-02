@@ -20,6 +20,8 @@ object ReceiverState {
         val clientName: String? = null,
         val clientModel: String? = null,
         val videoActive: Boolean = false,
+        /** A video the sender gave the address of (AirPlay video, not mirroring) is playing; see VideoPlayerActivity. */
+        val urlVideo: Boolean = false,
         val videoWidth: Int = 0,
         val videoHeight: Int = 0,
         val audioActive: Boolean = false,

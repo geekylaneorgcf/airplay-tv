@@ -45,6 +45,18 @@ object NativeBridge {
 
         /** A second sender was turned away because the current session is kept (see [nativeSetTakeover]). */
         fun onSessionBlocked(clientName: String)
+
+        /** AirPlay video: play the stream at [url] from [startSeconds] (negative when unknown, then [startFraction] of its length). */
+        fun onVideoPlay(url: String, startSeconds: Double, startFraction: Double)
+
+        /** The sender set the playback rate: 0 pauses, 1 plays. */
+        fun onVideoRate(rate: Double)
+
+        /** The sender moved to [seconds] in the video. */
+        fun onVideoScrub(seconds: Double)
+
+        /** The video session is over. */
+        fun onVideoEnd()
     }
 
     /** Decoder low-latency options, see video_decoder.h. */
@@ -157,6 +169,21 @@ object NativeBridge {
     }
 
     @JvmStatic
+    fun onVideoPlay(url: ByteArray?, startSeconds: Double, startFraction: Double) {
+        val u = url.utf8()
+        post { it.onVideoPlay(u, startSeconds, startFraction) }
+    }
+
+    @JvmStatic
+    fun onVideoRate(rate: Double) = post { it.onVideoRate(rate) }
+
+    @JvmStatic
+    fun onVideoScrub(seconds: Double) = post { it.onVideoScrub(seconds) }
+
+    @JvmStatic
+    fun onVideoEnd() = post { it.onVideoEnd() }
+
+    @JvmStatic
     fun onRemote(dacpId: ByteArray?, activeRemote: ByteArray?) {
         val d = dacpId.utf8()
         val a = activeRemote.utf8()
@@ -186,6 +213,7 @@ object NativeBridge {
         hevc: Boolean,
         model: String,
         sourceVersion: String,
+        video: Boolean,
     ): Int
 
     @JvmStatic
@@ -225,4 +253,8 @@ object NativeBridge {
 
     /** 0: another sender replaces the current session (the default); 1: it is turned away and [Listener.onSessionBlocked] hears of it. */
     external fun nativeSetTakeover(policy: Int)
+
+    /** What the video player reports (seconds) for the sender's GET /playback-info; [ready] is false until the stream can play. */
+    @JvmStatic
+    external fun nativeSetPlayback(duration: Double, position: Double, rate: Double, ready: Boolean)
 }

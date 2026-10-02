@@ -198,6 +198,14 @@ class Settings(context: Context) {
         get() = prefs.getBoolean(KEY_VISUALIZER, true)
         set(value) = prefs.edit().putBoolean(KEY_VISUALIZER, value).apply()
 
+    /**
+     * Offer AirPlay video: the cast button in apps such as Safari and YouTube sends the address of the video and this receiver plays it
+     * itself. Mirroring and music do not need it. A change restarts the receiver, which announces itself again.
+     */
+    var airplayVideo: Boolean
+        get() = prefs.getBoolean(KEY_VIDEO, true)
+        set(value) = prefs.edit().putBoolean(KEY_VIDEO, value).apply()
+
     /** The version whose "What's new" has been shown. */
     var seenVersion: String
         get() = prefs.getString(KEY_SEEN_VERSION, "") ?: ""
@@ -261,6 +269,7 @@ class Settings(context: Context) {
         const val KEY_NIGHT_MODE = "night_mode"
         const val KEY_VISUALIZER = "visualizer"
         const val KEY_SEEN_VERSION = "seen_version"
+        const val KEY_VIDEO = "airplay_video"
 
         /** What each limit offers, in the order the setting cycles through (the first is "no limit"). */
         val MAX_VOLUME_CHOICES = listOf(100, 90, 80, 70, 60, 50, 40)
@@ -288,7 +297,7 @@ class Settings(context: Context) {
         const val KEY_DECODER = "preferred_decoder"
 
         /** Settings that require the receiver to be restarted when they change. */
-        val RESTART_KEYS = setOf(KEY_NAME, KEY_PIN, KEY_RESOLUTION, KEY_FPS, KEY_DECODER, KEY_SPEAKER)
+        val RESTART_KEYS = setOf(KEY_NAME, KEY_PIN, KEY_RESOLUTION, KEY_FPS, KEY_DECODER, KEY_SPEAKER, KEY_VIDEO)
 
         /**
          * Normalises a device name: trims, drops control characters and limits the

@@ -78,7 +78,7 @@ class LgLink(private val context: Context, private val settings: Settings) {
 
     // ---- events from the service
 
-    fun sessionStarted() = work("session start") {
+    fun sessionStarted(holdPhone: Boolean = true) = work("session start") {
         if (!paired) return@work
         sessionOpen = true
         pausedByUs = false
@@ -87,7 +87,7 @@ class LgLink(private val context: Context, private val settings: Settings) {
         tvVolumeInCharge = false
         musicModeBroken = false
         if (!reachable()) {
-            if (settings.tvWake) wakeTv() else Log.i(SERVICE, "LG the TV is off and waking it over the network is switched off")
+            if (settings.tvWake) wakeTv(holdPhone) else Log.i(SERVICE, "LG the TV is off and waking it over the network is switched off")
         } else {
             ensureSession()
         }
@@ -208,7 +208,7 @@ class LgLink(private val context: Context, private val settings: Settings) {
 
     // ---- waking the TV
 
-    private fun wakeTv() {
+    private fun wakeTv(holdPhone: Boolean) {
         if (waking) return
         waking = true
         try {
@@ -218,9 +218,10 @@ class LgLink(private val context: Context, private val settings: Settings) {
                 return
             }
             Log.i(SERVICE, "LG the TV is off: waking it (${macs.size} address(es))")
-            pausePhone("waiting for the TV", force = true)
             val started = SystemClock.elapsedRealtime()
-            var attempt = 0
+            Wol.send(macs, broadcastAddresses())
+            if (holdPhone) pausePhone("waiting for the TV", force = true)
+            var attempt = 1
             while (sessionOpen && SystemClock.elapsedRealtime() - started < WAKE_WAIT_MS) {
                 if (attempt % 4 == 0) Wol.send(macs, broadcastAddresses())
                 attempt++

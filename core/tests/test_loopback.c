@@ -18,6 +18,7 @@
 #include <unistd.h>
 
 #include "airplay.h"
+#include "bplist.h"
 #include "fake_sender.h"
 #include "h264_gen.h"
 #include "mirror.h"
@@ -73,6 +74,15 @@ typedef struct {
     int photo_stops;
     int blocked;
     char blocked_name[64];
+    int video_plays;
+    char video_url[256];
+    double video_start;
+    double video_fraction;
+    int video_rates;
+    double video_rate;
+    int video_scrubs;
+    double video_scrub;
+    int video_ends;
     char photo_key[64];
     size_t photo_len;
     uint8_t photo_first;
@@ -239,6 +249,39 @@ static void ev_photo_stop(void *ctx) {
     pthread_mutex_unlock(&g_cap.lock);
 }
 
+static void ev_video_play(void *ctx, const char *url, double start_seconds, double start_fraction) {
+    (void) ctx;
+    pthread_mutex_lock(&g_cap.lock);
+    str_copy(g_cap.video_url, sizeof(g_cap.video_url), url);
+    g_cap.video_start = start_seconds;
+    g_cap.video_fraction = start_fraction;
+    g_cap.video_plays++;
+    pthread_mutex_unlock(&g_cap.lock);
+}
+
+static void ev_video_rate(void *ctx, double rate) {
+    (void) ctx;
+    pthread_mutex_lock(&g_cap.lock);
+    g_cap.video_rate = rate;
+    g_cap.video_rates++;
+    pthread_mutex_unlock(&g_cap.lock);
+}
+
+static void ev_video_scrub(void *ctx, double seconds) {
+    (void) ctx;
+    pthread_mutex_lock(&g_cap.lock);
+    g_cap.video_scrub = seconds;
+    g_cap.video_scrubs++;
+    pthread_mutex_unlock(&g_cap.lock);
+}
+
+static void ev_video_end(void *ctx) {
+    (void) ctx;
+    pthread_mutex_lock(&g_cap.lock);
+    g_cap.video_ends++;
+    pthread_mutex_unlock(&g_cap.lock);
+}
+
 static void ev_blocked(void *ctx, const char *name) {
     (void) ctx;
     pthread_mutex_lock(&g_cap.lock);
@@ -274,6 +317,8 @@ static const char *wrong_pin_source(void *ctx) {
     return wrong;
 }
 
+static bool g_start_with_video;
+
 static airplay_server_t *start_server(bool require_pin, int *port) {
     cap_reset();
     airplay_config_t cfg;
@@ -283,6 +328,7 @@ static airplay_server_t *start_server(bool require_pin, int *port) {
     str_copy(cfg.public_id, sizeof(cfg.public_id), "5d1a3c3e-0f2b-4c64-8a51-2d7c9f2b6a10");
     memset(cfg.identity_seed, 0x42, 32);
     cfg.require_pin = require_pin;
+    cfg.video = g_start_with_video;
     cfg.port = 0;
     cfg.display_width = 1920;
     cfg.display_height = 1080;
@@ -291,6 +337,7 @@ static airplay_server_t *start_server(bool require_pin, int *port) {
         .session_started = ev_started, .session_ended = ev_ended, .pin_display = ev_pin, .client_paired = ev_paired,
         .track_info = ev_track_info, .artwork = ev_artwork, .progress = ev_progress, .remote = ev_remote,
         .photo = ev_photo, .photo_stop = ev_photo_stop, .session_blocked = ev_blocked,
+        .video_play = ev_video_play, .video_rate = ev_video_rate, .video_scrub = ev_video_scrub, .video_end = ev_video_end,
     };
     airplay_server_t *s = airplay_server_create(&cfg, &ev, &kOps, NULL);
     if (!s) return NULL;
@@ -454,6 +501,139 @@ TEST(loopback_a_second_sender_is_turned_away_when_the_current_session_is_kept) {
     CHECK_EQ(g_cap.blocked, 1);
     fs_close(&c);
     fs_close(&a);
+    airplay_server_destroy(s);
+}
+
+/* The body of a /play: a binary plist with the address and the place to start at. */
+static size_t play_body(uint8_t *out, size_t cap, const char *url, double start_seconds) {
+    bp_node_t *d = bp_new_dict();
+    if (url) bp_dict_set(d, "Content-Location", bp_new_string(url));
+    if (start_seconds >= 0) bp_dict_set(d, "Start-Position-Seconds", bp_new_real(start_seconds));
+    bp_dict_set(d, "rate", bp_new_real(1.0));
+    uint8_t *data = NULL;
+    size_t len = 0;
+    size_t n = 0;
+    if (bp_write(d, &data, &len) == 0 && len <= cap) {
+        memcpy(out, data, len);
+        n = len;
+    }
+    free(data);
+    bp_free(d);
+    return n;
+}
+
+TEST(loopback_airplay_video_is_refused_unless_it_is_on) {
+    g_start_with_video = false;
+    int port = 0;
+    airplay_server_t *s = start_server(false, &port);
+    CHECK(s != NULL);
+    fake_sender_t f;
+    CHECK(fs_connect(&f, "127.0.0.1", (uint16_t) port) == 0);
+    uint8_t body[512];
+    size_t n = play_body(body, sizeof(body), "https://example.com/v.m3u8", 0);
+    int status = 0;
+    CHECK(fs_http(&f, "POST", "/play", "Content-Type: application/x-apple-binary-plist\r\n", body, n, &status, NULL, 0) == 0);
+    CHECK_EQ(status, 501);
+    CHECK_EQ(g_cap.video_plays, 0);
+    fs_close(&f);
+    airplay_server_destroy(s);
+}
+
+TEST(loopback_airplay_video_plays_a_url_and_reports_where_it_is) {
+    g_start_with_video = true;
+    int port = 0;
+    airplay_server_t *s = start_server(false, &port);
+    g_start_with_video = false;
+    CHECK(s != NULL);
+    fake_sender_t f;
+    CHECK(fs_connect(&f, "127.0.0.1", (uint16_t) port) == 0);
+    int status = 0;
+    char resp[4096];
+
+    /* the receiver says it takes video: the features it advertises have the video bits */
+    txt_entry_t e[24];
+    int count = airplay_txt_airplay(s, e, 24);
+    bool has_video_bit = false;
+    for (int i = 0; i < count; i++) {
+        if (strcmp(e[i].key, "features") == 0) {
+            unsigned long long low = strtoull(e[i].value, NULL, 16);
+            has_video_bit = (low & 1ull) != 0 && (low & 16ull) != 0;
+        }
+    }
+    CHECK(has_video_bit);
+
+    /* nothing plays yet */
+    CHECK(fs_http(&f, "GET", "/playback-info", NULL, NULL, 0, &status, resp, sizeof(resp)) == 0);
+    CHECK_EQ(status, 200);
+    CHECK(strstr(resp, "<key>readyToPlay</key><false/>") != NULL);
+
+    /* an address that is not http(s) is no video */
+    uint8_t body[512];
+    size_t n = play_body(body, sizeof(body), "file:///etc/passwd", 0);
+    CHECK(fs_http(&f, "POST", "/play", "Content-Type: application/x-apple-binary-plist\r\n", body, n, &status, NULL, 0) == 0);
+    CHECK_EQ(status, 400);
+    n = play_body(body, sizeof(body), NULL, 0);
+    CHECK(fs_http(&f, "POST", "/play", "Content-Type: application/x-apple-binary-plist\r\n", body, n, &status, NULL, 0) == 0);
+    CHECK_EQ(status, 400);
+    CHECK_EQ(g_cap.video_plays, 0);
+
+    /* a stream to play, from the twelfth second and a half */
+    n = play_body(body, sizeof(body), "https://example.com/video/master.m3u8", 12.5);
+    CHECK(fs_http(&f, "POST", "/play", "Content-Type: application/x-apple-binary-plist\r\nX-Apple-Session-ID: abc\r\n", body, n,
+                  &status, NULL, 0) == 0);
+    CHECK_EQ(status, 200);
+    CHECK(wait_for(&g_cap.video_plays, 1));
+    CHECK_STR(g_cap.video_url, "https://example.com/video/master.m3u8");
+    CHECK(g_cap.video_start > 12.49 && g_cap.video_start < 12.51);
+
+    /* what the player reports is what the sender reads */
+    airplay_server_set_playback(s, 120.0, 12.5, 1.0, true);
+    CHECK(fs_http(&f, "GET", "/playback-info", NULL, NULL, 0, &status, resp, sizeof(resp)) == 0);
+    CHECK_EQ(status, 200);
+    CHECK(strstr(resp, "<key>duration</key><real>120.000</real>") != NULL);
+    CHECK(strstr(resp, "<key>position</key><real>12.500</real>") != NULL);
+    CHECK(strstr(resp, "<key>rate</key><real>1.000</real>") != NULL);
+    CHECK(strstr(resp, "<key>readyToPlay</key><true/>") != NULL);
+
+    /* pause, and move */
+    CHECK(fs_http(&f, "POST", "/rate?value=0.000000", NULL, NULL, 0, &status, NULL, 0) == 0);
+    CHECK_EQ(status, 200);
+    CHECK(wait_for(&g_cap.video_rates, 1));
+    CHECK(g_cap.video_rate == 0.0);
+    CHECK(fs_http(&f, "POST", "/scrub?position=60.500000", NULL, NULL, 0, &status, NULL, 0) == 0);
+    CHECK_EQ(status, 200);
+    CHECK(wait_for(&g_cap.video_scrubs, 1));
+    CHECK(g_cap.video_scrub > 60.49 && g_cap.video_scrub < 60.51);
+    CHECK(fs_http(&f, "GET", "/scrub", NULL, NULL, 0, &status, resp, sizeof(resp)) == 0);
+    CHECK_EQ(status, 200);
+    CHECK(strstr(resp, "duration: 120.000") != NULL);
+    CHECK(strstr(resp, "position: 60.500") != NULL);
+    CHECK(fs_http(&f, "POST", "/rate", NULL, NULL, 0, &status, NULL, 0) == 0);
+    CHECK_EQ(status, 400);
+
+    /* the end */
+    CHECK(fs_http(&f, "POST", "/stop", NULL, NULL, 0, &status, NULL, 0) == 0);
+    CHECK_EQ(status, 200);
+    CHECK(wait_for(&g_cap.video_ends, 1));
+    CHECK(fs_http(&f, "GET", "/playback-info", NULL, NULL, 0, &status, resp, sizeof(resp)) == 0);
+    CHECK(strstr(resp, "<key>readyToPlay</key><false/>") != NULL);
+    CHECK(fs_http(&f, "POST", "/rate?value=1.0", NULL, NULL, 0, &status, NULL, 0) == 0);
+    CHECK_EQ(status, 454);
+    CHECK_EQ(g_cap.video_ends, 1);
+
+    /* a second video, ended by the sender's event connection closing */
+    fake_sender_t g;
+    CHECK(fs_connect(&g, "127.0.0.1", (uint16_t) port) == 0);
+    CHECK(fs_http(&g, "POST", "/reverse", "Connection: Upgrade\r\nUpgrade: PTTH/1.0\r\n", NULL, 0, &status, resp, sizeof(resp)) == 0);
+    CHECK_EQ(status, 101);
+    n = play_body(body, sizeof(body), "http://192.168.1.5:7001/clip.mp4", -1);
+    CHECK(fs_http(&f, "POST", "/play", "Content-Type: application/x-apple-binary-plist\r\n", body, n, &status, NULL, 0) == 0);
+    CHECK_EQ(status, 200);
+    CHECK(wait_for(&g_cap.video_plays, 2));
+    CHECK(g_cap.video_start < 0);
+    fs_close(&g);
+    CHECK(wait_for(&g_cap.video_ends, 2));
+    fs_close(&f);
     airplay_server_destroy(s);
 }
 

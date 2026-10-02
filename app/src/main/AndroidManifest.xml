@@ -114,6 +114,14 @@
             android:taskAffinity=".nowplaying"
             android:theme="@style/Theme.AirPlayTV" />
         <activity
+            android:name=".ui.VideoPlayerActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:taskAffinity=".playback"
+            android:theme="@style/Theme.AirPlayTV.Mirror" />
+        <activity
             android:name=".ui.MirrorActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density"
             android:excludeFromRecents="true"

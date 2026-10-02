@@ -60,5 +60,7 @@
     <string name="setting_check">Check The Receiver</string>
     <string name="check_title">Is this TV visible to phones?</string>
     <string name="visualizer_setting">Visualizer</string>
+    <string name="video_failed">This video cannot be played here</string>
+    <string name="setting_airplay_video">AirPlay Video</string>
     <string name="whats_new_title">What’s new in %1$s</string>
 </resources>

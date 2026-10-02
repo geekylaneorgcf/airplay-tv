@@ -13,6 +13,7 @@
  * receiver, e.g. the app on an emulator or a TV:
  *
  *   airplaytv_sender <ip> [port] [seconds] [--pair] [--audio]
+ *   airplaytv_sender <ip> [port] [seconds] --play <url>     AirPlay video: plays the address, reports where it is, stops
  */
 
 #include <signal.h>
@@ -21,6 +22,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "bplist.h"
 #include "fake_sender.h"
 #include "h264_gen.h"
 #include "ntp.h"
@@ -33,6 +35,46 @@ static void sleep_until(uint64_t deadline_ns) {
         struct timespec ts = { (time_t) (d / NS_PER_SEC), (long) (d % NS_PER_SEC) };
         nanosleep(&ts, NULL);
     }
+}
+
+/* AirPlay video as an iPhone asks for it: POST /play with the address, then GET /playback-info about once a second. */
+static int run_play(fake_sender_t *f, const char *url, int seconds) {
+    bp_node_t *d = bp_new_dict();
+    bp_dict_set(d, "Content-Location", bp_new_string(url));
+    bp_dict_set(d, "Start-Position-Seconds", bp_new_real(0.0));
+    bp_dict_set(d, "rate", bp_new_real(1.0));
+    uint8_t *body = NULL;
+    size_t len = 0;
+    if (bp_write(d, &body, &len) != 0) {
+        bp_free(d);
+        return 1;
+    }
+    bp_free(d);
+    int status = 0;
+    char resp[4096];
+    int rc = fs_http(f, "POST", "/play", "Content-Type: application/x-apple-binary-plist\r\nX-Apple-Session-ID: test\r\n", body, len,
+                     &status, resp, sizeof(resp));
+    free(body);
+    printf("POST /play: %d\n", rc == 0 ? status : -1);
+    if (rc != 0 || status != 200) {
+        return 1;
+    }
+    for (int i = 0; i < seconds; i++) {
+        struct timespec ts = { 1, 0 };
+        nanosleep(&ts, NULL);
+        if (fs_http(f, "GET", "/playback-info", NULL, NULL, 0, &status, resp, sizeof(resp)) != 0) {
+            printf("playback-info failed\n");
+            break;
+        }
+        const char *dur = strstr(resp, "<key>duration</key><real>");
+        const char *pos = strstr(resp, "<key>position</key><real>");
+        const char *ready = strstr(resp, "<key>readyToPlay</key><true/>");
+        printf("t=%2ds duration=%s position=%s ready=%s\n", i + 1, dur ? strtok((char *) dur + 25, "<") : "?",
+               pos ? strtok((char *) pos + 25, "<") : "?", ready ? "yes" : "no");
+    }
+    fs_http(f, "POST", "/stop", NULL, NULL, 0, &status, NULL, 0);
+    printf("POST /stop: %d\n", status);
+    return 0;
 }
 
 int main(int argc, char **argv) {
@@ -53,10 +95,22 @@ int main(int argc, char **argv) {
         pin_only |= strcmp(argv[i], "--pin-screen") == 0;
     }
 
+    const char *play_url = NULL;
+    for (int i = 2; i + 1 < argc; i++) {
+        if (strcmp(argv[i], "--play") == 0) {
+            play_url = argv[i + 1];
+        }
+    }
+
     fake_sender_t f;
     if (fs_connect(&f, ip, (uint16_t) port) != 0) {
         fprintf(stderr, "cannot connect to %s:%d\n", ip, port);
         return 1;
+    }
+    if (play_url) {
+        int rc = run_play(&f, play_url, seconds);
+        fs_close(&f);
+        return rc;
     }
     if (pin_only) {
         /* ask a PIN-protected receiver to show its code, then wait */

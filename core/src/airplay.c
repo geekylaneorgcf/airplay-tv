@@ -49,6 +49,8 @@
 #define CT_PARAMS "text/parameters"
 
 #define FEATURES_BASE 0x527FFEE6u     /* UxPlay's mirroring + audio feature set */
+#define FEATURE_VIDEO (1ull << 0)
+#define FEATURE_VIDEO_HLS (1ull << 4)
 #define FEATURE_LEGACY_PAIRING (1u << 27)
 #define FEATURE_SCREEN_MULTI_CODEC (1ull << 42)
 
@@ -141,6 +143,15 @@ struct airplay_server {
     pthread_mutex_t paired_lock;
     char **paired;
     int paired_count;
+
+    /* AirPlay video: a /play was accepted and no /stop has come; what the player last reported (under play_lock) */
+    bool video_active;
+    char video_session[64];
+    pthread_mutex_t play_lock;
+    double play_duration;
+    double play_position;
+    double play_rate;
+    bool play_ready;
 };
 
 /* ------------------------------------------------------------------------- */
@@ -153,6 +164,9 @@ uint64_t airplay_features(const airplay_config_t *config) {
     }
     if (config->hevc) {
         f |= FEATURE_SCREEN_MULTI_CODEC;
+    }
+    if (config->video) {
+        f |= FEATURE_VIDEO | FEATURE_VIDEO_HLS;
     }
     return f;
 }
@@ -510,8 +524,224 @@ static void handle_photo(airplay_server_t *s, const rtsp_request_t *req, rtsp_re
     http_empty(reply, 200, "OK");
 }
 
-/* The HTTP/1.1 side of AirPlay on the same port as RTSP: photos from the Photos app. Everything else
- * (AirPlay video playback, slideshows) is refused, and logged so a refused attempt can be recognised. */
+/* ------------------------------------------------------------------------- */
+/* video (HTTP): POST /play, GET /playback-info, POST /rate, POST|GET /scrub    */
+
+static bp_node_t *parse_plist_body(const rtsp_request_t *req);
+
+void airplay_server_set_playback(airplay_server_t *s, double duration, double position, double rate, bool ready) {
+    if (!s) {
+        return;
+    }
+    pthread_mutex_lock(&s->play_lock);
+    s->play_duration = duration;
+    s->play_position = position;
+    s->play_rate = rate;
+    s->play_ready = ready;
+    pthread_mutex_unlock(&s->play_lock);
+}
+
+/* The value of the query parameter name in url ("/rate?value=1.0"), parsed as a number; false when it is not there. */
+static bool query_number(const char *url, const char *name, double *out) {
+    const char *q = strchr(url, '?');
+    size_t n = strlen(name);
+    while (q) {
+        q++;
+        if (strncmp(q, name, n) == 0 && q[n] == '=') {
+            char *end = NULL;
+            double v = strtod(q + n + 1, &end);
+            if (end == q + n + 1) {
+                return false;
+            }
+            *out = v;
+            return true;
+        }
+        q = strchr(q, '&');
+    }
+    return false;
+}
+
+static void video_end(airplay_server_t *s) {
+    if (!s->video_active) {
+        return;
+    }
+    s->video_active = false;
+    s->video_session[0] = '\0';
+    airplay_server_set_playback(s, 0, 0, 0, false);
+    if (s->ev.video_end) {
+        s->ev.video_end(s->ev.ctx);
+    }
+}
+
+/* The body of a /play is a binary plist (Content-Location, Start-Position-Seconds or Start-Position), or, from older senders,
+ * lines of "Name: value" (text/parameters). */
+static bool parse_play(const rtsp_request_t *req, char *url, size_t url_cap, double *seconds, double *fraction) {
+    *seconds = -1;
+    *fraction = 0;
+    url[0] = '\0';
+    bp_node_t *root = parse_plist_body(req);
+    if (root && bp_type(root) == BP_DICT) {
+        const char *loc = bp_get_string(bp_dict_get(root, "Content-Location"));
+        if (loc) {
+            str_copy(url, url_cap, loc);
+        }
+        double v = 0;
+        if (bp_get_real(bp_dict_get(root, "Start-Position-Seconds"), &v) && v >= 0) {
+            *seconds = v;
+        } else {
+            int64_t iv = 0;
+            if (bp_get_int(bp_dict_get(root, "Start-Position-Seconds"), &iv) && iv >= 0) {
+                *seconds = (double) iv;
+            } else if (bp_get_real(bp_dict_get(root, "Start-Position"), &v) && v >= 0 && v <= 1) {
+                *fraction = v;
+            }
+        }
+        bp_free(root);
+    } else {
+        bp_free(root);
+        if (req->body && req->body_len > 0) {
+            char text[2048];
+            size_t n = req->body_len < sizeof(text) - 1 ? req->body_len : sizeof(text) - 1;
+            memcpy(text, req->body, n);
+            text[n] = '\0';
+            for (char *line = strtok(text, "\r\n"); line; line = strtok(NULL, "\r\n")) {
+                if (strncmp(line, "Content-Location:", 17) == 0) {
+                    const char *v = line + 17;
+                    while (*v == ' ') {
+                        v++;
+                    }
+                    str_copy(url, url_cap, v);
+                } else if (strncmp(line, "Start-Position:", 15) == 0) {
+                    double v = strtod(line + 15, NULL);
+                    if (v >= 0 && v <= 1) {
+                        *fraction = v;
+                    }
+                }
+            }
+        }
+    }
+    return strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0;
+}
+
+static void handle_play(airplay_server_t *s, const rtsp_request_t *req, rtsp_reply_t *reply) {
+    char url[1536];
+    double seconds = -1;
+    double fraction = 0;
+    if (!parse_play(req, url, sizeof(url), &seconds, &fraction)) {
+        LOG_W(AIRPLAY, "/play without a usable address");
+        http_empty(reply, 400, "Bad Request");
+        return;
+    }
+    const char *session = rtsp_header(req, "X-Apple-Session-ID");
+    if (s->video_active) {
+        /* a new /play replaces the one that plays */
+        video_end(s);
+    }
+    s->video_active = true;
+    str_copy(s->video_session, sizeof(s->video_session), session ? session : "");
+    airplay_server_set_playback(s, 0, seconds > 0 ? seconds : 0, 1, false);
+    LOG_I(AIRPLAY, "video: playing a stream sent by the sender");
+    if (s->ev.video_play) {
+        s->ev.video_play(s->ev.ctx, url, seconds, fraction);
+    } else {
+        s->video_active = false;
+        http_empty(reply, 501, "Not Implemented");
+        return;
+    }
+    http_empty(reply, 200, "OK");
+}
+
+static void handle_playback_info(airplay_server_t *s, rtsp_reply_t *reply) {
+    double duration;
+    double position;
+    double rate;
+    bool ready;
+    pthread_mutex_lock(&s->play_lock);
+    duration = s->play_duration;
+    position = s->play_position;
+    rate = s->play_rate;
+    ready = s->play_ready;
+    pthread_mutex_unlock(&s->play_lock);
+    char xml[2048];
+    int n;
+    if (!s->video_active) {
+        n = snprintf(xml, sizeof(xml),
+                     "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                     "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
+                     "<plist version=\"1.0\"><dict>\n<key>readyToPlay</key><false/>\n</dict></plist>\n");
+    } else {
+        n = snprintf(xml, sizeof(xml),
+                     "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                     "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
+                     "<plist version=\"1.0\"><dict>\n"
+                     "<key>duration</key><real>%.3f</real>\n"
+                     "<key>position</key><real>%.3f</real>\n"
+                     "<key>rate</key><real>%.3f</real>\n"
+                     "<key>readyToPlay</key><%s/>\n"
+                     "<key>playbackBufferEmpty</key><false/>\n"
+                     "<key>playbackBufferFull</key><true/>\n"
+                     "<key>playbackLikelyToKeepUp</key><true/>\n"
+                     "<key>stallCount</key><integer>0</integer>\n"
+                     "<key>loadedTimeRanges</key><array><dict><key>duration</key><real>%.3f</real><key>start</key><real>0.0</real></dict></array>\n"
+                     "<key>seekableTimeRanges</key><array><dict><key>duration</key><real>%.3f</real><key>start</key><real>0.0</real></dict></array>\n"
+                     "</dict></plist>\n",
+                     duration, position, rate, ready ? "true" : "false", duration, duration);
+    }
+    if (n <= 0 || (size_t) n >= sizeof(xml) || !rtsp_reply_body_copy(reply, "text/x-apple-plist+xml", xml, (size_t) n)) {
+        http_empty(reply, 500, "Internal Server Error");
+        return;
+    }
+    rtsp_reply_status(reply, 200, "OK");
+}
+
+static void handle_rate(airplay_server_t *s, const char *url, rtsp_reply_t *reply) {
+    double rate = 0;
+    if (!query_number(url, "value", &rate) || !s->video_active) {
+        http_empty(reply, s->video_active ? 400 : 454, s->video_active ? "Bad Request" : "Session Not Found");
+        return;
+    }
+    pthread_mutex_lock(&s->play_lock);
+    s->play_rate = rate;
+    pthread_mutex_unlock(&s->play_lock);
+    if (s->ev.video_rate) {
+        s->ev.video_rate(s->ev.ctx, rate);
+    }
+    http_empty(reply, 200, "OK");
+}
+
+static void handle_scrub(airplay_server_t *s, const char *method, const char *url, rtsp_reply_t *reply) {
+    if (!s->video_active) {
+        http_empty(reply, 454, "Session Not Found");
+        return;
+    }
+    if (strcmp(method, "POST") == 0) {
+        double position = 0;
+        if (!query_number(url, "position", &position) || position < 0) {
+            http_empty(reply, 400, "Bad Request");
+            return;
+        }
+        pthread_mutex_lock(&s->play_lock);
+        s->play_position = position;
+        pthread_mutex_unlock(&s->play_lock);
+        if (s->ev.video_scrub) {
+            s->ev.video_scrub(s->ev.ctx, position);
+        }
+        http_empty(reply, 200, "OK");
+        return;
+    }
+    char text[96];
+    pthread_mutex_lock(&s->play_lock);
+    int n = snprintf(text, sizeof(text), "duration: %.3f\r\nposition: %.3f\r\n", s->play_duration, s->play_position);
+    pthread_mutex_unlock(&s->play_lock);
+    if (n <= 0 || !rtsp_reply_body_copy(reply, CT_PARAMS, text, (size_t) n)) {
+        http_empty(reply, 500, "Internal Server Error");
+        return;
+    }
+    rtsp_reply_status(reply, 200, "OK");
+}
+
+/* The HTTP/1.1 side of AirPlay on the same port as RTSP: photos from the Photos app and, when video is on, URL playback
+ * (/play, /playback-info, /rate, /scrub). Everything else (slideshows) is refused, and logged so a refused attempt can be recognised. */
 static void handle_http(airplay_server_t *s, conn_t *c, const rtsp_request_t *req, rtsp_reply_t *reply) {
     const char *m = req->method;
     const char *url = req->url;
@@ -534,9 +764,20 @@ static void handle_http(airplay_server_t *s, conn_t *c, const rtsp_request_t *re
         handle_photo(s, req, reply);
     } else if (strcmp(m, "POST") == 0 && path_is(url, "/stop")) {
         photo_stop(s);
+        video_end(s);
+        http_empty(reply, 200, "OK");
+    } else if (s->cfg.video && strcmp(m, "POST") == 0 && path_is(url, "/play")) {
+        handle_play(s, req, reply);
+    } else if (s->cfg.video && strcmp(m, "GET") == 0 && path_is(url, "/playback-info")) {
+        handle_playback_info(s, reply);
+    } else if (s->cfg.video && strcmp(m, "POST") == 0 && path_is(url, "/rate")) {
+        handle_rate(s, url, reply);
+    } else if (s->cfg.video && path_is(url, "/scrub") && (strcmp(m, "POST") == 0 || strcmp(m, "GET") == 0)) {
+        handle_scrub(s, m, url, reply);
+    } else if (s->cfg.video && (path_is(url, "/setProperty") || path_is(url, "/getProperty") || path_is(url, "/action"))) {
         http_empty(reply, 200, "OK");
     } else {
-        /* AirPlay video (HLS/URL playback) and slideshows are not offered by this receiver. */
+        /* slideshows (and AirPlay video, unless it is switched on) are not offered by this receiver. */
         LOG_W(AIRPLAY, "HTTP %s %s is not supported", m, url);
         http_empty(reply, 501, "Not Implemented");
         reply->close_connection = true;
@@ -558,6 +799,7 @@ static void conn_close(airplay_server_t *s, int index) {
     }
     if (c->reversed) {
         photo_stop(s);
+        video_end(s);
     }
     net_close(&c->fd);
     pairing_session_clear(&c->pair);
@@ -1715,6 +1957,7 @@ airplay_server_t *airplay_server_create(const airplay_config_t *config, const ai
     s->wake.rd = s->wake.wr = -1;
     s->volume_db = 0.0f;
     pthread_mutex_init(&s->paired_lock, NULL);
+    pthread_mutex_init(&s->play_lock, NULL);
 
     if (s->cfg.display_width < 320 || s->cfg.display_height < 240) {
         s->cfg.display_width = 1920;
@@ -1801,6 +2044,7 @@ void airplay_server_destroy(airplay_server_t *s) {
     photo_cache_clear(s);
     airplay_server_set_paired_clients(s, NULL, 0);
     pthread_mutex_destroy(&s->paired_lock);
+    pthread_mutex_destroy(&s->play_lock);
     secure_zero(&s->identity, sizeof(s->identity));
     free(s);
 }
