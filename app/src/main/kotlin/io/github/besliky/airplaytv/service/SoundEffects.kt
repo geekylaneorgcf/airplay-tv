@@ -1,5 +1,6 @@
 package io.github.besliky.airplaytv.service
 
+import android.annotation.TargetApi
 import android.media.audiofx.DynamicsProcessing
 import android.media.audiofx.Equalizer
 import android.media.audiofx.LoudnessEnhancer
@@ -102,6 +103,7 @@ class SoundEffects(private val settings: Settings) {
         }
     }
 
+    @TargetApi(Build.VERSION_CODES.P)
     private fun build(): DynamicsProcessing {
         val config = DynamicsProcessing.Config.Builder(
             DynamicsProcessing.VARIANT_FAVOR_FREQUENCY_RESOLUTION, CHANNELS, false, 0, true, 1, false, 0, true,
