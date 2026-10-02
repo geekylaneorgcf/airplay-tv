@@ -5,11 +5,16 @@
 - **rc.12.** The home screen's chip gets what it needs: the receiver's broadcast now carries the phone's name, the song's length and place
   in it, and a small cover, and the receiver takes `COMMAND` broadcasts (play and pause, next, previous, seek) from the home screen's small
   player. They only do what the remote's media keys do, and only while a sender plays.
-- **Wake the TV over the network.** With the LG paired (TV Settings Button), a sender that connects while the TV is off makes the receiver
-  send Wake-on-LAN (needs the TV's own setting "Turn on via Wi-Fi"), put the TV on this stick's input, and ask the phone to wait with the
-  music until the picture is up. The input and the TV's hardware address are learned at the end of pairing, and by themselves whenever the
-  receiver talks to the TV: the address from the TV, the input when exactly one connected input is named like a Fire TV (the TV's input list is
-  logged, so a TV that names its inputs otherwise can be told by pressing TV Features, The Stick's TV Input). Settings, TV Features.
+- **Wake the TV.** With the LG paired (TV Settings Button), a sender that connects while the TV is off, or on standby with its network up,
+  makes the receiver press Home through the key service. A Home press makes the stick send "Text View On" and "Active Source" over
+  HDMI-CEC (seen in `dumpsys hdmi_control`), which switches a sleeping LG on and puts it on the stick: that is why the owner's Home press
+  woke the TV when AirPlay did not, the stick being awake already so that no wake-up of its own happens. No setting of the TV is needed
+  beyond HDMI-CEC (SimpLink); the key service must be on. The receiver also sends Wake-on-LAN when it knows the TV's address (the TV's own
+  setting "Turn on via Wi-Fi"), puts the TV on this stick's input when that is known, brings the player back to the front after the Home
+  press, and asks the phone to wait with the music until the picture is up. The input and the TV's hardware address are learned at the end
+  of pairing, and by themselves whenever the receiver talks to the TV: the address from the TV, the input when exactly one connected input is
+  named like a Fire TV (the TV's input list is logged, so a TV that names its inputs otherwise can be told by pressing TV Features, The
+  Stick's TV Input). Settings, TV Features, Wake The TV.
 - **TV features:** the TV's own volume follows the phone's slider and the remote's volume keys when the TV lets it move (a TV whose sound
   goes to a fixed output keeps the receiver's own volume); Music Mode turns the TV's screen off while only music plays and back on at the next
   key; Smart Pause pauses the phone when the TV is switched to another input or off.

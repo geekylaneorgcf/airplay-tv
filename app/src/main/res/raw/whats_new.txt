@@ -1,3 +1,4 @@
+A phone that connects while the TV is off now switches it on (Settings, TV Features).
 The home screen's player: the chip shows the cover, and OK on it opens play, pause and skip over Home.
 The phone's volume can move the TV's own volume, and limits keep it from starting loud (Settings, Volume Limits).
 Sound: bass, treble, loudness and a night mode (Settings, Sound).
