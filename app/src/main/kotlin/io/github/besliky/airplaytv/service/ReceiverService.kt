@@ -366,6 +366,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
             }
         }
         UserKeys.listener = { lg.userKey() }
+        lg.onHomePressed = { handler.postDelayed({ reopenScreens() }, REOPEN_AFTER_HOME_MS) }
         VideoPlayback.onScreenEnded = { handler.post { endUrlVideo(bySender = false) } }
         dacp = DacpClient(this).also { RemoteControl.client = it }
         network = NetworkMonitor(this, ::onNetworkChanged)
@@ -766,6 +767,21 @@ class ReceiverService : Service(), NativeBridge.Listener {
             ).acquire(3_000L)
         } catch (e: RuntimeException) {
             Log.w(SESSION, "cannot wake the display", e)
+        }
+    }
+
+    /** After Home was pressed to wake the TV: the screen of the session that is running comes back to the front. */
+    private fun reopenScreens() {
+        val s = ReceiverState.current
+        if (s.status != Status.CONNECTED) return
+        when {
+            s.urlVideo -> try {
+                startActivity(Intent(this, VideoPlayerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+            } catch (e: RuntimeException) {
+                Log.w(SESSION, "cannot bring the video screen back", e)
+            }
+            s.videoActive -> showPlayback()
+            s.audioActive -> showNowPlaying()
         }
     }
 
@@ -1255,6 +1271,8 @@ class ReceiverService : Service(), NativeBridge.Listener {
         private const val LYRICS_DELAY_MS = 800L
         private val LYRICS_RETRY_MS = longArrayOf(4_000, 12_000, 30_000)
 
+        /** How long after the Home press that wakes the TV the session's screen is brought back to the front. */
+        private const val REOPEN_AFTER_HOME_MS = 1_500L
         private const val HEALTH_MS = 60_000L
         private const val HEAL_MIN_GAP_MS = 2 * 60_000L
 

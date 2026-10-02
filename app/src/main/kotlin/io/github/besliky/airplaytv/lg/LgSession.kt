@@ -136,6 +136,13 @@ object LgFacts {
     fun powerState(message: JSONObject): String? =
         message.optJSONObject("payload")?.optString("state")?.takeIf { it.isNotEmpty() }
 
+    /** Whether [state] is the TV being off but for its network (quick start keeps it answering on its remote-control port). A screen turned off on purpose is not. */
+    fun isOnStandby(state: String?): Boolean =
+        state != null && (state.equals("Active Standby", ignoreCase = true) || state.equals("Suspend", ignoreCase = true))
+
+    /** Whether a session start has to wake the TV: it does not answer, or it answers but is on standby. */
+    fun needsWake(reachable: Boolean, powerState: String?): Boolean = !reachable || isOnStandby(powerState)
+
     /** Whether the TV shows a picture in [state]. A TV that names no state is taken to. */
     fun showsPicture(state: String?): Boolean = state == null || state.equals("Active", ignoreCase = true)
 

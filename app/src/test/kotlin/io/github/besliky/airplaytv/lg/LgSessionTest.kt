@@ -121,6 +121,18 @@ class LgSessionTest {
     }
 
     @Test
+    fun `a TV on standby or not answering is woken, a TV with its screen off on purpose is not`() {
+        assertTrue(LgFacts.needsWake(reachable = false, powerState = null))
+        assertTrue(LgFacts.needsWake(reachable = true, powerState = "Active Standby"))
+        assertTrue(LgFacts.needsWake(reachable = true, powerState = "suspend"))
+        assertFalse(LgFacts.needsWake(reachable = true, powerState = "Active"))
+        assertFalse(LgFacts.needsWake(reachable = true, powerState = null))
+        assertFalse(LgFacts.needsWake(reachable = true, powerState = "Screen Off"))
+        assertTrue(LgFacts.isOnStandby("Active Standby"))
+        assertFalse(LgFacts.isOnStandby(null))
+    }
+
+    @Test
     fun `volume comes in two shapes and a fixed output is not adjustable`() {
         assertEquals(LgFacts.Volume(9, muted = true, adjustable = true), LgFacts.volume(JSONObject("""{"payload":{"volume":9,"muted":true}}""")))
         assertEquals(

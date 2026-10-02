@@ -25,9 +25,11 @@ import org.json.JSONObject
 /**
  * What this receiver does with an LG TV that has been paired (see TvPairing), in step with a session:
  *
- * - **Waking the TV.** A sender that connects while the TV is off (its remote-control port does not answer) makes the receiver
- *   wake the TV over the network (Wake-on-LAN, needs the TV's setting "Turn on via Wi-Fi") and put it on this stick's input, and
- *   asks the phone to wait with the music until the picture is up, so the first seconds are not lost.
+ * - **Waking the TV.** A sender that connects while the TV is off (its remote-control port does not answer, or the TV says it is on
+ *   standby) makes the receiver press Home through the key service, which makes the stick ask the TV to switch on over HDMI-CEC just as
+ *   the owner's Home press does, and wake it over the network too when it can (Wake-on-LAN, needs the TV's setting "Turn on via Wi-Fi");
+ *   then it puts the TV on this stick's input and asks the phone to wait with the music until the picture is up, so the first seconds
+ *   are not lost.
  * - **The TV's own volume.** The phone's slider and the remote's volume keys move the TV's volume, when the TV lets it be moved;
  *   a TV that sends its sound to a fixed output does not, and then the receiver's own volume is the one that moves.
  * - **Music mode.** While only music plays the TV's screen goes off (the sound goes on) and comes back at the next key.
@@ -40,6 +42,10 @@ class LgLink(private val context: Context, private val settings: Settings) {
     /** Set by the service: called with true when the TV's volume is in charge (the output is then at full scale) and with false when it is not. */
     @Volatile
     var onTvVolumeInCharge: ((Boolean) -> Unit)? = null
+
+    /** Set by the service: called (on the worker) after Home was pressed to wake the TV, so that it can bring the player back to the front. */
+    @Volatile
+    var onHomePressed: (() -> Unit)? = null
 
     private val worker = Executors.newSingleThreadScheduledExecutor { Thread(it, "lg-link").apply { isDaemon = true } }
 
@@ -56,6 +62,7 @@ class LgLink(private val context: Context, private val settings: Settings) {
     private var tvVolumeInCharge = false
     private var musicModeBroken = false
     private var waking = false
+    private var lastHomeAt = 0L
 
     @Volatile
     private var sessionOpen = false
@@ -88,9 +95,14 @@ class LgLink(private val context: Context, private val settings: Settings) {
         tvVolumeInCharge = false
         musicModeBroken = false
         if (!reachable()) {
-            if (settings.tvWake) wakeTv(holdPhone) else Log.i(SERVICE, "LG the TV is off and waking it over the network is switched off")
+            if (settings.tvWake) wakeTv(holdPhone) else Log.i(SERVICE, "LG the TV is off and waking it is switched off")
         } else {
-            ensureSession()
+            val opened = ensureSession()
+            // a TV on standby with its network kept up (quick start) answers, but shows nothing
+            val state = opened?.let { askPowerState(it) }
+            if (LgFacts.isOnStandby(state)) {
+                if (settings.tvWake) wakeTv(holdPhone) else Log.i(SERVICE, "LG the TV is on standby and waking it is switched off")
+            }
         }
     }
 
@@ -214,29 +226,55 @@ class LgLink(private val context: Context, private val settings: Settings) {
 
     // ---- waking the TV
 
+    /** The TV's power state, asked now; null when it does not say. */
+    private fun askPowerState(opened: LgSession): String? =
+        opened.request("ssap://com.webos.service.tvpower/power/getPowerState")?.let { LgFacts.powerState(it) }?.also { powerState = it }
+
+    /** Whether the TV is on and not on standby: its port answers and it does not say it is off. */
+    private fun tvIsUp(): Boolean {
+        if (!reachable(1000)) return false
+        val opened = ensureSession() ?: return true // it answers but will not talk: there is nothing more to ask it
+        return !LgFacts.isOnStandby(askPowerState(opened))
+    }
+
+    /**
+     * A Home press, which makes the stick ask the TV to switch on over HDMI-CEC (see [MenuKeyService.pressHome]); at most once in 30 s.
+     * False when the key service is off.
+     */
+    private fun pressHome(): Boolean {
+        val now = SystemClock.elapsedRealtime()
+        if (lastHomeAt != 0L && now - lastHomeAt < HOME_GAP_MS) return true // pressed a moment ago: that one is still being waited for
+        if (!MenuKeyService.pressHome()) return false
+        lastHomeAt = now
+        Log.i(SERVICE, "LG pressed Home: the stick asks the TV to switch on over HDMI-CEC")
+        onHomePressed?.invoke()
+        return true
+    }
+
     private fun wakeTv(holdPhone: Boolean) {
         if (waking) return
         waking = true
         try {
             val macs = knownMacs()
-            if (macs.isEmpty()) {
-                Log.w(SERVICE, "LG the TV is off but its hardware address is not known: pair the TV again while it is on")
+            val started = SystemClock.elapsedRealtime()
+            val homed = pressHome()
+            if (macs.isNotEmpty()) Wol.send(macs, broadcastAddresses())
+            if (!homed && macs.isEmpty()) {
+                Log.w(SERVICE, "LG the TV is off and cannot be woken: the key service is off (no Home press) and the TV's hardware address is not known (no Wake-on-LAN)")
                 return
             }
-            Log.i(SERVICE, "LG the TV is off: waking it (${macs.size} address(es))")
-            val started = SystemClock.elapsedRealtime()
-            Wol.send(macs, broadcastAddresses())
+            Log.i(SERVICE, "LG the TV is off: waking it (${if (homed) "Home press" else "no Home press"}, ${macs.size} network address(es))")
             if (holdPhone) pausePhone("waiting for the TV", force = true)
             var attempt = 1
             while (sessionOpen && SystemClock.elapsedRealtime() - started < WAKE_WAIT_MS) {
-                if (attempt % 4 == 0) Wol.send(macs, broadcastAddresses())
+                if (macs.isNotEmpty() && attempt % 4 == 0) Wol.send(macs, broadcastAddresses())
                 attempt++
                 Thread.sleep(1000)
-                if (reachable(1000)) break
+                if (tvIsUp()) break
             }
             if (!sessionOpen) return
-            if (!reachable()) {
-                Log.w(SERVICE, "LG the TV did not wake in ${WAKE_WAIT_MS / 1000} s: is \"Turn on via Wi-Fi\" on in the TV's settings?")
+            if (!tvIsUp()) {
+                Log.w(SERVICE, "LG the TV did not wake in ${WAKE_WAIT_MS / 1000} s: is HDMI-CEC (SimpLink) on in the TV's settings, and, for the network way, \"Turn on via Wi-Fi\"?")
                 resumePhone()
                 return
             }
@@ -316,7 +354,7 @@ class LgLink(private val context: Context, private val settings: Settings) {
     private fun isAway(): Boolean {
         val learned = settings.lgInput
         val offInput = learned.isNotEmpty() && currentApp != null && currentApp != learned
-        val off = powerState != null && (powerState.equals("Suspend", true) || powerState.equals("Active Standby", true))
+        val off = LgFacts.isOnStandby(powerState)
         return offInput || off
     }
 
@@ -399,6 +437,7 @@ class LgLink(private val context: Context, private val settings: Settings) {
         const val AWAY_AFTER_MS = 2_000L
         const val TV_OFF_CHECK_MS = 3_000L
         const val WAKE_WAIT_MS = 45_000L
+        const val HOME_GAP_MS = 30_000L
         const val SETTLE_MS = 2_500L
         const val PAUSE_TRIES = 8
         const val PAUSE_RETRY_MS = 700L

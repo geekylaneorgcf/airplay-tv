@@ -54,7 +54,7 @@
     <string name="tv_detecting">Asking the TV…</string>
     <string name="tv_detected">The stick is on %1$s of the TV.</string>
     <string name="tv_detect_failed">The TV did not say. Is it on, with this stick’s picture in front?</string>
-    <string name="tv_wake_hint">To be woken over the network, the TV needs its own setting: General, Devices, External Devices, TV On With Mobile, Turn On Via Wi-Fi.</string>
+    <string name="tv_wake_hint">A phone that connects while the TV is off presses Home for you, which makes the stick ask the TV to switch on over HDMI-CEC (the TV needs its SimpLink or HDMI-CEC setting on, and the key service must be on). To be woken over the network as well, the TV needs: General, Devices, External Devices, TV On With Mobile, Turn On Via Wi-Fi.</string>
 
     <!-- the check -->
     <string name="setting_check">Check The Receiver</string>

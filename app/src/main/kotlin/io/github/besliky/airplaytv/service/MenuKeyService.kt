@@ -79,6 +79,16 @@ class MenuKeyService : AccessibilityService() {
             return service.performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN)
         }
 
+        /**
+         * Presses Home, as the remote's button does (the service injects the key). On this stick a Home press makes its own HDMI-CEC send
+         * "Text View On" and "Active Source", which switches a sleeping TV on and puts it on the stick: that is why the owner's Home press
+         * wakes the TV when AirPlay does not (seen in `dumpsys hdmi_control`). False if the service is off.
+         */
+        fun pressHome(): Boolean {
+            val service = instance ?: return false
+            return service.performGlobalAction(GLOBAL_ACTION_HOME)
+        }
+
         /** The service's name for `enabled_accessibility_services`, see [AccessibilitySetup.component]. */
         fun component(packageName: String): String = AccessibilitySetup.component(packageName, MenuKeyService::class.java.name)
     }
