@@ -167,6 +167,9 @@ class DacpClient(context: Context) {
         private const val TIMEOUT_MS = 2000
 
         const val PLAY_PAUSE = "playpause"
+
+        /** Pauses and nothing else: it does not start a song that is paused. */
+        const val PAUSE = "pause"
         const val NEXT = "nextitem"
         const val PREVIOUS = "previtem"
 

@@ -79,6 +79,9 @@ class LgLink(private val context: Context, private val settings: Settings) {
     @Volatile
     private var sessionOpen = false
 
+    // the session is over but the TV's volume has not gone back yet, see sessionEnded
+    private var restorePending = false
+
     private val volumeQueued = AtomicBoolean(false)
 
     @Volatile
@@ -99,6 +102,8 @@ class LgLink(private val context: Context, private val settings: Settings) {
     // ---- events from the service
 
     fun sessionStarted(holdPhone: Boolean = true) = work("session start") {
+        // a session that follows closely on the last: the TV's volume goes back first, nothing is playing yet
+        if (restorePending) finishSession()
         if (!paired) return@work
         sessionOpen = true
         pausedByUs = false
@@ -128,6 +133,20 @@ class LgLink(private val context: Context, private val settings: Settings) {
     fun sessionEnded() = work("session end") {
         sessionOpen = false
         if (screenOffByUs) turnScreenOn()
+        if (tvVolumeInCharge && !tvVolumeBroken && tvRestoreTo > 0 && tvLastSet != tvRestoreTo && session?.closed == false) {
+            // The last sound the receiver sent is still on its way through the HDMI chain to the TV's speakers, a few hundred milliseconds
+            // after the receiver's output stopped. The TV's volume went down for the phone's slider: raising it now would make that tail
+            // loud (a burst of music when the phone moves to its own speaker). It goes back when the tail has played.
+            restorePending = true
+            worker.schedule(Runnable { work("restore the volume") { if (restorePending) finishSession() } }, RESTORE_DELAY_MS, TimeUnit.MILLISECONDS)
+        } else {
+            finishSession()
+        }
+    }
+
+    /** The end of a session on the TV's side: its volume goes back, and what was kept for the session is let go. */
+    private fun finishSession() {
+        restorePending = false
         giveBackTvVolume()
         tvReference = -1
         tvLastSet = -1
@@ -539,6 +558,9 @@ class LgLink(private val context: Context, private val settings: Settings) {
 
     private companion object {
         const val MUSIC_MODE_AFTER_MS = 12_000L
+
+        /** How long after the session's end the TV's volume goes back: longer than the sound takes from the receiver to the TV's speakers. */
+        const val RESTORE_DELAY_MS = 900L
         const val AWAY_AFTER_MS = 2_000L
         const val TV_OFF_CHECK_MS = 3_000L
         const val WAKE_WAIT_MS = 45_000L

@@ -357,6 +357,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
         effects = SoundEffects(settings)
         audio.onTrack = { sessionId -> effects.attach(sessionId) }
         audio.onStopped = { effects.release() }
+        audio.onFocus = { change -> onAudioFocus(change) }
         lg = LgLink(this, settings).also { link ->
             link.onTvVolumeInCharge = { inCharge ->
                 handler.post {
@@ -1011,6 +1012,38 @@ class ReceiverService : Service(), NativeBridge.Listener {
         showNowPlaying()
     }
 
+    /**
+     * Another app on the TV started playing (the YouTube app, say) and took the sound: the output went silent by itself, and the phone
+     * is asked to pause, as an Apple TV does when its owner starts something else. A moment of silence for a voice prompt, or music that
+     * is already paused, asks for nothing. When the phone plays again, the sound comes back, see [onPlaying].
+     */
+    private fun onAudioFocus(change: Int) {
+        if (change != AudioManager.AUDIOFOCUS_LOSS) return
+        val state = ReceiverState.current
+        if (!state.audioActive || !state.playing || state.clientName == null) return
+        Log.i(SESSION, "another app on the TV took the sound: the phone's music is paused")
+        pausePhoneForOtherApp(tries = 0)
+    }
+
+    /** The phone's remote service may not be known yet, so a few tries; "pause", and the toggle only for a sender that does not know it. */
+    private fun pausePhoneForOtherApp(tries: Int) {
+        val state = ReceiverState.current
+        if (!state.playing || state.clientName == null || !audio.focusLost) return
+        RemoteControl.send(DacpClient.PAUSE) { status ->
+            handler.post {
+                val now = ReceiverState.current
+                if (!now.playing || now.clientName == null || !audio.focusLost) return@post
+                if (status in 200..299) return@post
+                if (tries >= PAUSE_FOR_APP_TRIES) {
+                    Log.i(SESSION, "the phone's music could not be paused for the other app: it stays silent here")
+                    return@post
+                }
+                if (status >= 0) RemoteControl.send(DacpClient.PLAY_PAUSE)
+                handler.postDelayed({ pausePhoneForOtherApp(tries + 1) }, PAUSE_FOR_APP_RETRY_MS)
+            }
+        }
+    }
+
     override fun onAudioStopped() {
         audio.stop()
         ReceiverState.update { it.copy(audioActive = false) }
@@ -1154,6 +1187,8 @@ class ReceiverService : Service(), NativeBridge.Listener {
             }
             it.copy(playing = playing, positionMs = position, positionAtMs = now)
         }
+        // The phone plays again after the sound had gone to another app: it is the owner's choice, so the sound comes back.
+        if (playing) audio.regainFocus()
         // Playing again after the screen went to sleep (a long pause): bring the screen back.
         if (playing && !(getSystemService(Context.POWER_SERVICE) as PowerManager).isInteractive) {
             wakeDisplay()
@@ -1290,6 +1325,8 @@ class ReceiverService : Service(), NativeBridge.Listener {
     companion object {
         /** Must match STARVE_MS in core/android/audio_pipeline.c: how long the audio was dry. */
         private const val PAUSE_DETECT_MS = 300L
+        private const val PAUSE_FOR_APP_TRIES = 4
+        private const val PAUSE_FOR_APP_RETRY_MS = 1200L
 
         /** Latency of the audio system beyond the output buffer, a guess that the measurement of a real song can refine. */
         private const val OUTPUT_DELAY_MS = 60L

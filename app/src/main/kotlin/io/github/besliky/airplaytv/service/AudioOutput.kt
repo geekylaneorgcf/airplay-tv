@@ -25,6 +25,19 @@ class AudioOutput(context: Context) {
     private var track: AudioTrack? = null
     private var thread: Thread? = null
     private var focusRequest: AudioFocusRequest? = null
+    private var focusAttributes: AudioAttributes? = null
+
+    /** Another app took the sound for good: this output is silent until [regainFocus]. */
+    @Volatile
+    var focusLost = false
+        private set
+
+    // silent while another app has the sound (for a moment or for good), and quieter while it speaks over it
+    @Volatile
+    private var focusMuted = false
+
+    @Volatile
+    private var ducked = false
 
     @Volatile
     private var running = false
@@ -44,6 +57,9 @@ class AudioOutput(context: Context) {
 
     /** Called when the track is let go. */
     var onStopped: (() -> Unit)? = null
+
+    /** Called on the main thread when another app takes the sound or gives it back: an [AudioManager] AUDIOFOCUS_ constant. */
+    var onFocus: ((Int) -> Unit)? = null
 
     val active: Boolean get() = running
 
@@ -87,6 +103,9 @@ class AudioOutput(context: Context) {
             t.release()
             return
         }
+        focusMuted = false
+        ducked = false
+        focusLost = false
         t.setVolume(gain)
         bufferMs = t.bufferSizeInFrames * 1000 / sampleRate
         channelCount = if (channels == 1) 1 else 2
@@ -138,10 +157,32 @@ class AudioOutput(context: Context) {
 
     fun setVolume(value: Float) {
         gain = value.coerceIn(0f, 1f)
-        track?.setVolume(gain)
+        applyTrackVolume()
+    }
+
+    private fun applyTrackVolume() {
+        track?.setVolume(if (focusMuted) 0f else if (ducked) gain * DUCKED_GAIN else gain)
+    }
+
+    /**
+     * Takes the sound back from another app, because the sender plays again after the receiver had given it up (the owner pressed
+     * play on the phone): that is a choice for AirPlay, and the receiver does not hold the sound against a player the owner started
+     * meanwhile any other way, so it is called only for a sender that resumes.
+     */
+    fun regainFocus() {
+        if (!focusLost) return
+        focusAttributes?.let { requestFocus(it) }
+        focusLost = false
+        focusMuted = false
+        ducked = false
+        applyTrackVolume()
+        Log.i(AUDIO, "the sound is taken back from the other app")
     }
 
     fun stop() {
+        // silent at once: what is already in the buffers and on its way to the speakers is not heard any louder than it is now, whatever
+        // happens to the TV's volume next (see LgLink.sessionEnded)
+        track?.setVolume(0f)
         running = false
         thread?.let {
             it.interrupt()
@@ -154,10 +195,31 @@ class AudioOutput(context: Context) {
         abandonFocus()
     }
 
+    private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
+        when (change) {
+            AudioManager.AUDIOFOCUS_LOSS -> {
+                Log.i(AUDIO, "another app took the sound for good")
+                focusLost = true
+                focusMuted = true
+            }
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> focusMuted = true
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> ducked = true
+            AudioManager.AUDIOFOCUS_GAIN -> {
+                focusMuted = false
+                ducked = false
+                focusLost = false
+            }
+        }
+        applyTrackVolume()
+        onFocus?.invoke(change)
+    }
+
     private fun requestFocus(attributes: AudioAttributes) {
+        focusAttributes = attributes
+        focusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
         val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
             .setAudioAttributes(attributes)
-            .setOnAudioFocusChangeListener { }
+            .setOnAudioFocusChangeListener(focusListener)
             .build()
         focusRequest = request
         audioManager.requestAudioFocus(request)
@@ -166,5 +228,13 @@ class AudioOutput(context: Context) {
     private fun abandonFocus() {
         focusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
         focusRequest = null
+        focusLost = false
+        focusMuted = false
+        ducked = false
+    }
+
+    private companion object {
+        /** How loud the output stays while another app speaks over it (a voice prompt). */
+        const val DUCKED_GAIN = 0.25f
     }
 }
