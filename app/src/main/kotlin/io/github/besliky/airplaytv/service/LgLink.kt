@@ -128,11 +128,7 @@ class LgLink(private val context: Context, private val settings: Settings) {
     fun sessionEnded() = work("session end") {
         sessionOpen = false
         if (screenOffByUs) turnScreenOn()
-        restoreTvVolume()
-        if (tvVolumeInCharge) {
-            tvVolumeInCharge = false
-            onTvVolumeInCharge?.invoke(false)
-        }
+        giveBackTvVolume()
         tvReference = -1
         tvLastSet = -1
         tvRestoreTo = -1
@@ -168,7 +164,12 @@ class LgLink(private val context: Context, private val settings: Settings) {
 
     /** The slider (the phone's or the remote's) is at [level] (0 to 1): the TV's volume follows, when it can. */
     fun volume(level: Float) {
-        if (!paired || !settings.tvVolume) return
+        if (!paired) return
+        if (!settings.tvVolume) {
+            // switched off while the TV's volume was in charge: the receiver's own volume takes over again
+            work("tv volume off") { if (tvVolumeInCharge) giveBackTvVolume() }
+            return
+        }
         latestLevel = level
         if (volumeQueued.compareAndSet(false, true)) {
             work("volume") {
@@ -518,7 +519,16 @@ class LgLink(private val context: Context, private val settings: Settings) {
         tvRestoreTo = facts.level
     }
 
-    /** The session is over: the TV goes back to the volume it had when the phone connected, or that its owner set on it since. */
+    /** The TV's volume is not the slider's any more (the session is over, or the setting was switched off): it goes back, and the receiver's own volume is in charge again. */
+    private fun giveBackTvVolume() {
+        restoreTvVolume()
+        if (tvVolumeInCharge) {
+            tvVolumeInCharge = false
+            onTvVolumeInCharge?.invoke(false)
+        }
+    }
+
+    /** The TV goes back to the volume it had when the phone connected, or that its owner set on it since. */
     private fun restoreTvVolume() {
         val back = tvRestoreTo
         if (!tvVolumeInCharge || tvVolumeBroken || back <= 0 || tvLastSet == back) return
