@@ -2,6 +2,11 @@
 
 ## [0.2.1] - fork
 
+- **rc.13.** The log shows what a sender asks of the receiver (the first 80 requests of each connection: method, address, a few harmless
+  headers, the text of a parameter request and the shape of a property-list body; never a pairing or FairPlay body, a name or an
+  address), and a request the receiver does not know is a warning instead of silence. It is how the question whether the phone's
+  volume slider can follow the receiver without AirPlay 2 is answered from one ordinary session (see the research note in firetv-4kmax,
+  `docs/AIRPLAY2.md`). No behaviour changes.
 - **rc.12.** The home screen's chip gets what it needs: the receiver's broadcast now carries the phone's name, the song's length and place
   in it, and a small cover, and the receiver takes `COMMAND` broadcasts (play and pause, next, previous, seek) from the home screen's small
   player. They only do what the remote's media keys do, and only while a sender plays.

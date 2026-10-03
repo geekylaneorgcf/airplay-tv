@@ -83,6 +83,7 @@ struct conn {
     bool reversed;            /* upgraded to the sender's event channel (POST /reverse); stays open while idle */
     bool close_after_reply;
     bool closing;
+    int trace;                /* requests of this connection shown so far, see trace_request */
     pairing_session_t pair;
     bool pair_trusted;        /* PIN mode: pair-verify proved a paired identity */
     fairplay_t fp;
@@ -1616,6 +1617,85 @@ static void handle_teardown(airplay_server_t *s, conn_t *c, const rtsp_request_t
     session_destroy(s, session);
 }
 
+/* Appends the shape of a property list to out: the keys, the kind of each value, numbers, and the text of the few values that say
+ * which protocol is used. Nothing else is shown, so a name or an address never reaches the log. */
+static void trace_plist(const bp_node_t *node, char *out, size_t cap, int depth) {
+    size_t n = strlen(out);
+    if (!node || n + 8 >= cap || depth > 3) {
+        return;
+    }
+    bp_type_t t = bp_type(node);
+    if (t == BP_DICT) {
+        n += (size_t) snprintf(out + n, cap - n, "{");
+        for (size_t i = 0, count = bp_count(node); i < count && strlen(out) + 24 < cap; i++) {
+            const char *key = bp_dict_key_at(node, i);
+            bp_node_t *v = bp_dict_value_at(node, i);
+            n = strlen(out);
+            n += (size_t) snprintf(out + n, cap - n, "%s%s=", i ? "," : "", key ? key : "?");
+            const char *text = bp_get_string(v);
+            uint64_t u = 0;
+            bool b = false;
+            if (text && key && (strcmp(key, "timingProtocol") == 0 || strcmp(key, "et") == 0)) {
+                snprintf(out + n, cap - n, "\"%.20s\"", text);
+            } else if (bp_get_uint(v, &u)) {
+                snprintf(out + n, cap - n, "%llu", (unsigned long long) u);
+            } else if (bp_get_bool(v, &b)) {
+                snprintf(out + n, cap - n, "%s", b ? "true" : "false");
+            } else if (bp_type(v) == BP_DICT || bp_type(v) == BP_ARRAY) {
+                trace_plist(v, out, cap, depth + 1);
+            } else {
+                snprintf(out + n, cap - n, "~");
+            }
+        }
+        n = strlen(out);
+        snprintf(out + n, cap - n, "}");
+    } else if (t == BP_ARRAY) {
+        snprintf(out + n, cap - n, "[%zu x ", bp_count(node));
+        if (bp_count(node) > 0) {
+            trace_plist(bp_array_get(node, 0), out, cap, depth + 1);
+        }
+        n = strlen(out);
+        snprintf(out + n, cap - n, "]");
+    }
+}
+
+/* What the sender asks of the receiver, for the first requests of each connection: method, address, a few harmless headers, the text
+ * of a parameter request, the shape of a plist body. Shown at INFO so a session can be read from the log without a packet capture
+ * (this is how the AirPlay 2 question is answered). Pairing and FairPlay bodies are never shown. */
+static void trace_request(conn_t *c, const rtsp_request_t *req) {
+    if (c->trace >= 80) {
+        return;
+    }
+    c->trace++;
+    const char *ct = rtsp_header(req, "Content-Type");
+    const char *ua = rtsp_header(req, "User-Agent");
+    const char *pv = rtsp_header(req, "X-Apple-ProtocolVersion");
+    char names[200] = "";
+    for (int i = 0; i < req->header_count && strlen(names) + 30 < sizeof(names); i++) {
+        size_t n = strlen(names);
+        snprintf(names + n, sizeof(names) - n, "%s%.24s", i ? "," : "", req->headers[i].name);
+    }
+    char shape[320] = "";
+    bool secret = strstr(req->url, "pair") != NULL || strstr(req->url, "fp-") != NULL;
+    if (!secret && ct && req->body && req->body_len > 0) {
+        if (str_ieq(ct, CT_PARAMS) && req->body_len < 100) {
+            size_t n = MIN(req->body_len, sizeof(shape) - 1);
+            for (size_t i = 0; i < n; i++) {
+                shape[i] = (req->body[i] >= 32 && req->body[i] < 127) ? (char) req->body[i] : '.';
+            }
+            shape[n] = '\0';
+        } else if (req->body_len >= 8 && memcmp(req->body, "bplist00", 8) == 0) {
+            bp_node_t *root = bp_parse(req->body, req->body_len);
+            if (root) {
+                trace_plist(root, shape, sizeof(shape), 0);
+                bp_free(root);
+            }
+        }
+    }
+    LOG_I(AIRPLAY, "request %s %s %s body %zu type %s ua %s proto %s headers %s%s%s", req->method, req->url, req->protocol,
+          req->body_len, ct ? ct : "-", ua ? ua : "-", pv ? pv : "-", names, shape[0] ? " body-shape " : "", shape);
+}
+
 static void handle_request(airplay_server_t *s, conn_t *c, const rtsp_request_t *req, rtsp_reply_t *reply) {
     const char *m = req->method;
     const char *url = req->url;
@@ -1654,7 +1734,7 @@ static void handle_request(airplay_server_t *s, conn_t *c, const rtsp_request_t 
                    strcmp(url, "/command") == 0) {
             /* heartbeat and hints: nothing to do beyond noting the activity */
         } else {
-            LOG_D(AIRPLAY, "unhandled POST %s", url);
+            LOG_W(AIRPLAY, "unhandled POST %s", url);
         }
     } else if (strcmp(m, "OPTIONS") == 0) {
         rtsp_reply_header(reply, "Public",
@@ -1672,6 +1752,7 @@ static void handle_request(airplay_server_t *s, conn_t *c, const rtsp_request_t 
     } else if (strcmp(m, "TEARDOWN") == 0) {
         handle_teardown(s, c, req, reply);
     } else {
+        LOG_W(AIRPLAY, "unsupported request %s %s", m, url);
         rtsp_reply_status(reply, 501, "Not Implemented");
     }
 }
@@ -1709,6 +1790,7 @@ static bool process_rx(airplay_server_t *s, conn_t *c) {
             reply.close_connection = true;
         } else {
             LOG_D(AIRPLAY, "%s %s", req->method, req->url);
+            trace_request(c, req);
             handle_request(s, c, req, &reply);
         }
         if (strcmp(req->protocol, "RTSP/1.0") == 0) {
