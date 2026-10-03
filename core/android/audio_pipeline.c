@@ -123,8 +123,10 @@ static void ring_write_locked(const int16_t *pcm, size_t frames) {
     if (!g_ap.ring || frames == 0) {
         return;
     }
-    if (log_enabled(LOGL_DEBUG) && (g_ap.peek_tick++ % 256) == 0) {
-        /* in debug logs: whether what was decoded is sound, and how loud (the peak of this chunk, 32767 at the most) */
+    unsigned tick = g_ap.peek_tick++;
+    if (tick < 3 || tick % 2048 == 0) {
+        /* in the log: whether what was decoded is sound, and how loud (the peak of this chunk, 32767 at the most); the first chunks of a
+         * session and then one in a while, so that a stream that decodes to silence can be told from one that does not arrive */
         int peak = 0;
         for (size_t i = 0; i < frames * CHANNELS; i++) {
             int v = pcm[i] < 0 ? -pcm[i] : pcm[i];
@@ -132,7 +134,7 @@ static void ring_write_locked(const int16_t *pcm, size_t frames) {
                 peak = v;
             }
         }
-        LOG_D(AUDIO, "decoded %zu frames, peak %d", frames, peak);
+        LOG_I(AUDIO, "decoded %zu frames, peak %d", frames, peak);
     }
     if (frames > g_ap.ring_frames) {
         pcm += (frames - g_ap.ring_frames) * CHANNELS;
@@ -181,6 +183,7 @@ bool ap_start(const audio_format_t *format) {
     g_ap.max_frames = low_latency ? rate * 150 / 1000 : rate * 700 / 1000;
     ring_reset_locked();
     g_ap.pts_us = 0;
+    g_ap.peek_tick = 0;
 
     bool ok = g_ap.ring && g_ap.pcm;
     if (ok && format->ct == AUDIO_CT_ALAC) {
