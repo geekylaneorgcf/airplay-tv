@@ -1,62 +1,59 @@
 package io.github.besliky.airplaytv.service
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TvVolumeTest {
 
     @Test
-    fun `the slider moves the TV between zero and the volume it had`() {
-        assertEquals(15, TvVolume.target(1f, 15))
-        assertEquals(8, TvVolume.target(0.5f, 15))
-        assertEquals(5, TvVolume.target(0.33f, 15))
-        assertEquals(0, TvVolume.target(0f, 15))
+    fun `the slider is the TV's real scale`() {
+        assertEquals(100, TvVolume.absolute(1f, 100))
+        assertEquals(70, TvVolume.absolute(0.7f, 100))
+        assertEquals(30, TvVolume.absolute(0.3f, 100))
+        assertEquals(0, TvVolume.absolute(0f, 100))
+        assertEquals(100, TvVolume.absolute(3f, 100))
+        assertEquals(0, TvVolume.absolute(-1f, 100))
     }
 
     @Test
-    fun `the TV is never taken above the volume it had, whatever the slider says`() {
-        assertEquals(15, TvVolume.target(3f, 15))
-        assertEquals(0, TvVolume.target(-1f, 15))
-        assertEquals(100, TvVolume.target(1f, 250))
+    fun `a ceiling scales the whole slider into less of the TV's scale`() {
+        // a night ceiling of 40 %: the top of the slider is a TV volume of 40, half of it 20
+        assertEquals(40, TvVolume.absolute(1f, 40))
+        assertEquals(20, TvVolume.absolute(0.5f, 40))
+        // the lowest ceiling the limits allow is 10
+        assertEquals(10, TvVolume.absolute(1f, 3))
     }
 
     @Test
-    fun `a slider that began low leaves the TV where it was`() {
-        // a phone that has not played to this receiver before starts its slider a third of the way up
-        val home = TvVolume.home(0.33f)
-        assertEquals(17, TvVolume.target(TvVolume.fraction(0.33f, home, 1f), 17))
-        // turned down to half of where it began: half of the TV's volume
-        assertEquals(8, TvVolume.target(TvVolume.fraction(0.165f, home, 1f), 16))
-        assertEquals(0, TvVolume.target(TvVolume.fraction(0f, home, 1f), 17))
-        // turned up: never above what the TV had
-        assertEquals(17, TvVolume.target(TvVolume.fraction(1f, home, 1f), 17))
+    fun `the TV stays where it was until the slider moves, and never above the ceiling`() {
+        assertEquals(30, TvVolume.atHome(30, 100))
+        assertEquals(25, TvVolume.atHome(30, 25))
+        assertEquals(100, TvVolume.atHome(250, 100))
+        assertEquals(0, TvVolume.atHome(-5, 100))
     }
 
     @Test
-    fun `a slider that began at the top moves the TV as it always did`() {
-        val home = TvVolume.home(1f)
-        assertEquals(1f, home, 0f)
-        assertEquals(15, TvVolume.target(TvVolume.fraction(1f, home, 1f), 15))
-        assertEquals(8, TvVolume.target(TvVolume.fraction(0.5f, home, 1f), 15))
-        assertEquals(5, TvVolume.target(TvVolume.fraction(0.33f, home, 1f), 15))
+    fun `a slider counts as moved by more than a hair's breadth`() {
+        assertFalse(TvVolume.moved(0.33f, 0.33f))
+        assertFalse(TvVolume.moved(0.34f, 0.33f))
+        assertTrue(TvVolume.moved(0.5f, 0.33f))
+        assertTrue(TvVolume.moved(0.1f, 0.33f))
+        // a session whose first level is not known yet has moved nothing to compare with
+        assertTrue(TvVolume.moved(0.5f, -1f))
     }
 
     @Test
-    fun `the ceiling of the volume limits holds the TV below its volume, from the start`() {
-        val home = TvVolume.home(0.4f)
-        // a night ceiling of half: the TV begins at half of its volume and the top of the slider is no higher
-        assertEquals(10, TvVolume.target(TvVolume.fraction(0.4f, home, 0.5f), 20))
-        assertEquals(10, TvVolume.target(TvVolume.fraction(1f, home, 0.5f), 20))
-        assertEquals(5, TvVolume.target(TvVolume.fraction(0.2f, home, 0.5f), 20))
-    }
-
-    @Test
-    fun `a slider that began at the bottom is not taken as home`() {
-        assertEquals(0.25f, TvVolume.home(0f), 0f)
-        assertEquals(0.25f, TvVolume.home(0.1f), 0f)
-        assertEquals(0.6f, TvVolume.home(0.6f), 0f)
-        assertEquals(1f, TvVolume.home(7f), 0f)
+    fun `the slider position for a TV volume is the inverse of the scale`() {
+        assertEquals(0.3f, TvVolume.levelFor(30, 100), 0.0001f)
+        assertEquals(0.5f, TvVolume.levelFor(20, 40), 0.0001f)
+        assertEquals(1f, TvVolume.levelFor(90, 40), 0f)
+        assertEquals(0f, TvVolume.levelFor(-3, 100), 0f)
+        // and stepping one TV unit up from it gives the next TV volume
+        assertEquals(31, TvVolume.absolute(TvVolume.levelFor(30, 100) + 1f / 100, 100))
+        assertEquals(21, TvVolume.absolute(TvVolume.levelFor(20, 40) + 1f / 40, 40))
     }
 
     @Test
@@ -74,21 +71,5 @@ class TvVolumeTest {
         assertNull(TvVolume.leftBehind("6,300", 6))
         // a session that took the TV all the way down (zero) is owed it back too
         assertEquals(15, TvVolume.leftBehind("0,15", 0))
-    }
-
-    @Test
-    fun `a volume the owner set on the TV moves the top of the slider`() {
-        // the slider stood at half, the TV was turned up to 12: full would be 24
-        assertEquals(24, TvVolume.referenceAfterTvChange(12, 0.5f))
-        assertEquals(15, TvVolume.referenceAfterTvChange(15, 1f))
-        // a TV turned right down still leaves something to move
-        assertEquals(1, TvVolume.referenceAfterTvChange(0, 0.5f))
-        assertEquals(100, TvVolume.referenceAfterTvChange(80, 0.5f))
-    }
-
-    @Test
-    fun `no reference is guessed from a slider that stood nearly at the bottom`() {
-        assertNull(TvVolume.referenceAfterTvChange(5, 0.05f))
-        assertNull(TvVolume.referenceAfterTvChange(5, 0f))
     }
 }

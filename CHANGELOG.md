@@ -2,6 +2,12 @@
 
 ## [0.2.1] - fork
 
+- **rc.21.**
+  - **The phone's volume slider is the TV's real 0 to 100.** The slider used to be scaled into the TV's volume at connect (the TV at 30
+    made the whole slider a range of 0 to 30). Now the TV stays where it is until the slider is moved, and from then on 70 % is a TV volume
+    of 70, full is 100 (the volume limits' ceiling still scales the whole slider into less: a ceiling of 40 % makes full a TV volume of 40).
+    The remote's volume keys step the TV from the volume it has now (one step of the TV's own scale per press), and mute and unmute use the
+    TV's volume, not the phone's slider position.
 - **rc.20.**
   - **The TV is woken when it is on standby and closes the connection.** An LG on standby with its network kept up (quick start) takes the
     receiver's connection and closes it before it talks. The receiver took that for "nothing to ask" and did not wake the TV (seen in the
