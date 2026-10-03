@@ -133,6 +133,15 @@ class LgSessionTest {
     }
 
     @Test
+    fun `a refused connection is told from one that gets no answer`() {
+        assertTrue(LgFacts.isRefusal("failed to connect to /192.168.1.86 (port 3001) from /192.168.1.76 (port 40000) after 1500ms: isConnected failed: ECONNREFUSED (Connection refused)"))
+        assertTrue(LgFacts.isRefusal("Connection refused"))
+        assertFalse(LgFacts.isRefusal("failed to connect to /192.168.1.86 (port 3001) after 1500ms: isConnected failed: EHOSTUNREACH (No route to host)"))
+        assertFalse(LgFacts.isRefusal("failed to connect to /192.168.1.86 (port 3001) after 1500ms"))
+        assertFalse(LgFacts.isRefusal(null))
+    }
+
+    @Test
     fun `volume comes in two shapes and a fixed output is not adjustable`() {
         assertEquals(LgFacts.Volume(9, muted = true, adjustable = true), LgFacts.volume(JSONObject("""{"payload":{"volume":9,"muted":true}}""")))
         assertEquals(

@@ -136,6 +136,10 @@ object LgFacts {
     fun powerState(message: JSONObject): String? =
         message.optJSONObject("payload")?.optString("state")?.takeIf { it.isNotEmpty() }
 
+    /** Whether the message of a failed connection says the other end refused it (a machine that is up and does not listen), as opposed to saying nothing. */
+    fun isRefusal(message: String?): Boolean =
+        message != null && (message.contains("ECONNREFUSED") || message.contains("connection refused", ignoreCase = true))
+
     /** Whether [state] is the TV being off but for its network (quick start keeps it answering on its remote-control port). A screen turned off on purpose is not. */
     fun isOnStandby(state: String?): Boolean =
         state != null && (state.equals("Active Standby", ignoreCase = true) || state.equals("Suspend", ignoreCase = true))

@@ -13,6 +13,7 @@ import io.github.besliky.airplaytv.lg.LgSetup
 import io.github.besliky.airplaytv.lg.LgTv
 import io.github.besliky.airplaytv.lg.TvSettings
 import io.github.besliky.airplaytv.lg.Wol
+import java.net.ConnectException
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.util.Calendar
@@ -72,6 +73,7 @@ class LgLink(private val context: Context, private val settings: Settings) {
     private var musicModeBroken = false
     private var waking = false
     private var lastHomeAt = 0L
+    private var wakeFailedAt = 0L
 
     @Volatile
     private var sessionOpen = false
@@ -105,14 +107,18 @@ class LgLink(private val context: Context, private val settings: Settings) {
         tvReference = -1
         tvLastSet = -1
         musicModeBroken = false
-        if (!reachable()) {
-            if (settings.tvWake) wakeTv(holdPhone) else Log.i(SERVICE, "LG the TV is off and waking it is switched off")
-        } else {
-            val opened = ensureSession()
-            // a TV on standby with its network kept up (quick start) answers, but shows nothing
-            val state = opened?.let { askPowerState(it) }
-            if (LgFacts.isOnStandby(state)) {
-                if (settings.tvWake) wakeTv(holdPhone) else Log.i(SERVICE, "LG the TV is on standby and waking it is switched off")
+        when (probe()) {
+            Probe.SILENT ->
+                if (settings.tvWake) wakeTv(holdPhone) else Log.i(SERVICE, "LG the TV is off and waking it is switched off")
+            // a refusal comes from a machine that is up: the TV is on, but not taking remote control, or this is not the TV's address
+            Probe.REFUSED -> Log.i(SERVICE, "LG the TV's address answers but not on its remote-control port: there is nothing to wake")
+            Probe.OPEN -> {
+                val opened = ensureSession()
+                // a TV on standby with its network kept up (quick start) answers, but shows nothing
+                val state = opened?.let { askPowerState(it) }
+                if (LgFacts.isOnStandby(state)) {
+                    if (settings.tvWake) wakeTv(holdPhone) else Log.i(SERVICE, "LG the TV is on standby and waking it is switched off")
+                }
             }
         }
     }
@@ -179,14 +185,21 @@ class LgLink(private val context: Context, private val settings: Settings) {
 
     // ---- the TV
 
-    private fun reachable(timeoutMs: Int = 1500): Boolean = try {
+    /** What the TV's remote-control port does: takes the connection, refuses it (a machine that is up and does not listen), or says nothing. */
+    private enum class Probe { OPEN, REFUSED, SILENT }
+
+    private fun probe(timeoutMs: Int = 1500): Probe = try {
         Socket().use { socket ->
             socket.connect(InetSocketAddress(settings.lgHost, LgTv.WSS_PORT), timeoutMs)
-            true
+            Probe.OPEN
         }
+    } catch (e: ConnectException) {
+        if (LgFacts.isRefusal(e.message)) Probe.REFUSED else Probe.SILENT
     } catch (_: Exception) {
-        false
+        Probe.SILENT
     }
+
+    private fun reachable(timeoutMs: Int = 1500): Boolean = probe(timeoutMs) == Probe.OPEN
 
     private fun ensureSession(): LgSession? {
         session?.takeIf { !it.closed }?.let { return it }
@@ -280,28 +293,43 @@ class LgLink(private val context: Context, private val settings: Settings) {
                 return
             }
             Log.i(SERVICE, "LG the TV is off: waking it (${if (homed) "Home press" else "no Home press"}, ${macs.size} network address(es))")
-            val pausing = if (holdPhone) pauser.submit(Runnable { pausePhone("waiting for the TV", force = true) }) else null
+            // the music is held only for a TV that has woken before: a wrong address or a TV that does not wake must not stop the music at every session
+            val hold = holdPhone && (wakeFailedAt == 0L || started - wakeFailedAt > RETRY_HOLD_AFTER_MS)
+            val pausing = if (hold) pauser.submit(Runnable { pausePhone("waiting for the TV", force = true) }) else null
             var attempt = 1
+            var released = false
             while (sessionOpen && SystemClock.elapsedRealtime() - started < WAKE_WAIT_MS) {
                 if (macs.isNotEmpty() && attempt % 4 == 0) Wol.send(macs, broadcastAddresses())
                 attempt++
                 Thread.sleep(1000)
                 if (tvIsUp()) break
+                if (!released && SystemClock.elapsedRealtime() - started > HOLD_MAX_MS) {
+                    // a TV that takes this long: the music goes on, the TV is still waited for
+                    released = true
+                    finishPausing(pausing)
+                    resumePhone()
+                }
             }
             if (!sessionOpen) return
             if (!tvIsUp()) {
+                wakeFailedAt = SystemClock.elapsedRealtime()
                 Log.w(SERVICE, "LG the TV did not wake in ${WAKE_WAIT_MS / 1000} s: is HDMI-CEC (SimpLink) on in the TV's settings, and, for the network way, \"Turn on via Wi-Fi\"?")
-                finishPausing(pausing)
-                resumePhone()
+                if (!released) {
+                    finishPausing(pausing)
+                    resumePhone()
+                }
                 return
             }
+            wakeFailedAt = 0L
             Log.i(SERVICE, "LG the TV is on after ${(SystemClock.elapsedRealtime() - started) / 1000} s")
             val opened = ensureSession()
             switchToStick(opened)
             // the picture and sound need a moment to settle after the TV's input changes
             Thread.sleep(SETTLE_MS)
-            finishPausing(pausing)
-            resumePhone()
+            if (!released) {
+                finishPausing(pausing)
+                resumePhone()
+            }
         } finally {
             waking = false
         }
@@ -499,6 +527,8 @@ class LgLink(private val context: Context, private val settings: Settings) {
         const val AWAY_AFTER_MS = 2_000L
         const val TV_OFF_CHECK_MS = 3_000L
         const val WAKE_WAIT_MS = 45_000L
+        const val HOLD_MAX_MS = 20_000L
+        const val RETRY_HOLD_AFTER_MS = 10 * 60_000L
         const val HOME_GAP_MS = 30_000L
         const val OWN_CHANGE_ECHO_MS = 1_500L
         const val SETTLE_MS = 2_500L
