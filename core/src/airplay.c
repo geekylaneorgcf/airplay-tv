@@ -1979,6 +1979,7 @@ static void ap2_handle_info(airplay_server_t *s, conn_t *c, rtsp_reply_t *reply)
     bp_dict_set(root, "protocolVersion", bp_new_string("1.1"));
     dict_set_uint(root, "volumeControlType", 3);
     bp_dict_set(root, "screenDemoMode", bp_new_bool(false));
+    bp_dict_set(root, "receiverHDRCapability", bp_new_string("4k60"));
     bp_dict_set(root, "psi", bp_new_string(psi));
     bp_dict_set(root, "featuresEx", bp_new_string(fex));
     dict_set_uint(root, "features", s->features);
@@ -1992,8 +1993,9 @@ static void ap2_handle_info(airplay_server_t *s, conn_t *c, rtsp_reply_t *reply)
     bp_dict_set(root, "sourceVersion", bp_new_string(s->cfg.srcvers));
     bp_node_t *formats = bp_new_dict();
     dict_set_uint(formats, "audioStream", 0x1440800);
-    /* only what the audio output plays: ALAC 44100 Hz 16 bit stereo (bit 18) */
-    dict_set_uint(formats, "bufferStream", 0x40000ull);
+    /* the four formats shairport-sync names: ALAC and AAC-LC at 44100 Hz (bits 18, 22), ALAC and AAC-LC at 48000 Hz (bits 21, 23). With
+     * only one of them offered an iPhone did not start a stream at all. */
+    dict_set_uint(formats, "bufferStream", 0x40000ull | 0x400000ull | 0x200000ull | 0x800000ull);
     bp_dict_set(root, "supportedFormats", formats);
     txt_entry_t entries[24];
     uint8_t txt[1024];
