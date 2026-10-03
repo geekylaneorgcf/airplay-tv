@@ -6,3 +6,5 @@ A second phone can be turned away, or you are asked (Settings, Second Phone).
 The receiver checks itself and restarts what has gone quiet; Advanced, Check The Receiver says why a phone cannot see this TV.
 A calm visualizer on the Now Playing screen, a resting screen while paused, and a time bubble when you seek.
 AirPlay video: the cast button in apps such as Safari plays the video on this TV (Settings, Advanced).
+Another app that starts playing on the TV (YouTube, say) takes the sound: the phone's music pauses instead of playing along.
+The TV's volume no longer jumps up for a moment when the phone moves to its own speaker.
