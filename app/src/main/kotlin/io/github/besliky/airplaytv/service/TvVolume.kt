@@ -34,6 +34,19 @@ object TvVolume {
     fun referenceAfterTvChange(tvVolume: Int, fraction: Float): Int? =
         if (fraction < MIN_LEVEL_TO_TELL) null else Math.round(tvVolume.coerceIn(0, 100) / fraction).coerceIn(1, 100)
 
+    /**
+     * What the TV is owed from a session that ended without giving its volume back (the receiver was stopped, or the TV did not answer):
+     * [record] is "the volume the receiver put it at,the volume it had", and when the TV [current] still stands where the receiver put
+     * it, nobody has touched it since and it goes back to the volume it had. Null when nothing is owed, or when somebody set it since.
+     */
+    fun leftBehind(record: String, current: Int): Int? {
+        val parts = record.split(',')
+        if (parts.size != 2) return null
+        val put = parts[0].trim().toIntOrNull() ?: return null
+        val had = parts[1].trim().toIntOrNull() ?: return null
+        return if (current == put && had > put && had in 1..100) had else null
+    }
+
     private const val MIN_LEVEL_TO_TELL = 0.1f
     private const val MIN_HOME = 0.25f
 }

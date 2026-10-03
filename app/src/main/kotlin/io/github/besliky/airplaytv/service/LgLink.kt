@@ -509,15 +509,24 @@ class LgLink(private val context: Context, private val settings: Settings) {
                 Log.i(SERVICE, "LG the TV's volume is fixed (its sound goes to an external output): the receiver's own volume stays")
                 return
             }
-            if (facts.muted || facts.level <= 0) {
+            var start = facts.level
+            // an earlier session that ended without giving the TV its volume back left it where that session put it
+            val owed = if (facts.muted) null else TvVolume.leftBehind(settings.tvLeftBehind, facts.level)
+            if (owed != null) {
+                val answer = opened.request("ssap://audio/setVolume", JSONObject().put("volume", owed))
+                Log.i(SERVICE, "LG the TV's volume had been left at ${facts.level} by an earlier session: back to $owed ${if (LgSession.succeeded(answer)) "(done)" else "(no answer)"}")
+                if (LgSession.succeeded(answer)) start = owed
+            }
+            settings.tvLeftBehind = ""
+            if (facts.muted || start <= 0) {
                 tvVolumeBroken = true
                 Log.i(SERVICE, "LG the TV is muted or at zero: its volume is left alone and the receiver's own volume stays")
                 return
             }
-            tvReference = facts.level
-            tvLastSet = facts.level
-            tvRestoreTo = facts.level
-            Log.i(SERVICE, "LG the TV's volume is ${facts.level}: it stays there while the phone's slider stays where it began (${"%.2f".format(tvHome(level))}), and the slider turns it down from there")
+            tvReference = start
+            tvLastSet = start
+            tvRestoreTo = start
+            Log.i(SERVICE, "LG the TV's volume is $start: it stays there while the phone's slider stays where it began (${"%.2f".format(tvHome(level))}), and the slider turns it down from there")
         }
         val target = TvVolume.target(tvFraction(level), tvReference)
         if (tvVolumeInCharge && target == tvLastSet) return
@@ -534,6 +543,8 @@ class LgLink(private val context: Context, private val settings: Settings) {
         if (answer != null) {
             tvLastSet = target
             tvLastSetAt = SystemClock.elapsedRealtime()
+            // written down at once: if this session never gets to give the volume back, the next one finds out
+            settings.tvLeftBehind = if (target < tvRestoreTo) "$target,$tvRestoreTo" else ""
         }
         if (!tvVolumeInCharge) {
             tvVolumeInCharge = true
@@ -553,6 +564,7 @@ class LgLink(private val context: Context, private val settings: Settings) {
         tvReference = moved
         tvLastSet = facts.level
         tvRestoreTo = facts.level
+        settings.tvLeftBehind = "" // the owner's own volume now: nothing is owed
     }
 
     /** The TV's volume is not the slider's any more (the session is over, or the setting was switched off): it goes back, and the receiver's own volume is in charge again. */
@@ -571,6 +583,7 @@ class LgLink(private val context: Context, private val settings: Settings) {
         val opened = session?.takeIf { !it.closed } ?: return
         val answer = opened.request("ssap://audio/setVolume", JSONObject().put("volume", back))
         Log.i(SERVICE, "LG the TV's volume goes back to $back: ${if (LgSession.succeeded(answer)) "done" else "no answer"}")
+        if (LgSession.succeeded(answer)) settings.tvLeftBehind = ""
     }
 
     private companion object {

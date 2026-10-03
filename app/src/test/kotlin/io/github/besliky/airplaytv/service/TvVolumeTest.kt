@@ -60,6 +60,23 @@ class TvVolumeTest {
     }
 
     @Test
+    fun `a TV left where a session put it goes back to what it had`() {
+        // the session put the TV at 6 (from 17) and never gave it back: the TV still stands at 6
+        assertEquals(17, TvVolume.leftBehind("6,17", 6))
+        // the owner set it since: not ours to move
+        assertNull(TvVolume.leftBehind("6,17", 7))
+        assertNull(TvVolume.leftBehind("6,17", 17))
+        // nothing owed, or a record that is not one
+        assertNull(TvVolume.leftBehind("", 6))
+        assertNull(TvVolume.leftBehind("17,17", 17))
+        assertNull(TvVolume.leftBehind("6", 6))
+        assertNull(TvVolume.leftBehind("six,17", 6))
+        assertNull(TvVolume.leftBehind("6,300", 6))
+        // a session that took the TV all the way down (zero) is owed it back too
+        assertEquals(15, TvVolume.leftBehind("0,15", 0))
+    }
+
+    @Test
     fun `a volume the owner set on the TV moves the top of the slider`() {
         // the slider stood at half, the TV was turned up to 12: full would be 24
         assertEquals(24, TvVolume.referenceAfterTvChange(12, 0.5f))

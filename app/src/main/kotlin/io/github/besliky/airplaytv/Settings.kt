@@ -142,6 +142,16 @@ class Settings(context: Context) {
         get() = prefs.getBoolean(KEY_TV_VOLUME, true)
         set(value) = prefs.edit().putBoolean(KEY_TV_VOLUME, value).apply()
 
+    /**
+     * The TV's volume that a session of this receiver lowered and has not given back yet, as "the volume the receiver put it at,the volume
+     * it had"; empty when nothing is owed. A session that ends in the usual way gives the volume back and empties it. One that does not
+     * (the app was stopped, the TV did not answer) would leave the TV low for good, and the next session would take that low volume for
+     * the owner's own; see [io.github.besliky.airplaytv.service.TvVolume.leftBehind].
+     */
+    var tvLeftBehind: String
+        get() = prefs.getString(KEY_TV_LEFT_BEHIND, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_TV_LEFT_BEHIND, value).apply()
+
     /** Volume limits, see [io.github.besliky.airplaytv.service.VolumeLimits]. */
     var maxVolumePercent: Int
         get() = prefs.getInt(KEY_VOLUME_MAX, 100).let { if (it in MAX_VOLUME_CHOICES) it else 100 }
@@ -236,7 +246,7 @@ class Settings(context: Context) {
      * Switched on as a trial: [airplay2TrialUntil] is when it switches itself off again if no phone has started a session by then.
      */
     var airplay2: Int
-        get() = prefs.getInt(KEY_AIRPLAY2, AIRPLAY2_OFF).coerceIn(AIRPLAY2_OFF, AIRPLAY2_NTP)
+        get() = prefs.getInt(KEY_AIRPLAY2, AIRPLAY2_OFF).coerceIn(AIRPLAY2_OFF, AIRPLAY2_PTP_ONLY)
         set(value) = prefs.edit().putInt(KEY_AIRPLAY2, value).apply()
 
     /**
@@ -275,6 +285,7 @@ class Settings(context: Context) {
         const val AIRPLAY2_ON = 1
         const val AIRPLAY2_FULL = 2
         const val AIRPLAY2_NTP = 3
+        const val AIRPLAY2_PTP_ONLY = 4 // the PTP bit without the buffered-audio bit: an experiment, set with run-as
         const val KEY_SLEEP = "sleep_after_minutes"
         const val KEY_RETURN = "return_to_player"
         const val KEY_TV_MENU = "tv_menu_button"
@@ -287,6 +298,7 @@ class Settings(context: Context) {
         const val KEY_MUSIC_MODE = "music_mode"
         const val KEY_SMART_PAUSE = "smart_pause"
         const val KEY_TV_VOLUME = "tv_volume"
+        const val KEY_TV_LEFT_BEHIND = "tv_left_behind"
         const val KEY_VOLUME_MAX = "volume_max"
         const val KEY_VOLUME_NIGHT = "volume_night"
         const val KEY_NIGHT_FROM = "night_from"

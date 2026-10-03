@@ -2,6 +2,12 @@
 
 ## [0.2.1] - fork
 
+- **rc.16.**
+  - **The TV's volume cannot stay low after a session that ended badly.** The receiver remembers the volume it set on the TV; when a
+    session ends without giving the volume back (the app was killed, the link dropped), the next session finds the TV still at that
+    volume and puts it back to what it was before, instead of taking the low value as the new starting point.
+  - **AirPlay 2** (debug builds only): a fourth trial mode (clock bit only), a longer request trace, and the test server can advertise
+    itself on a Mac. Still hidden and off in release builds.
 - **rc.15.**
   - **The TV keeps its volume when the phone's slider begins low.** The TV's own volume followed the slider between zero and what the TV
     had when the phone connected, so a phone whose slider began a third of the way up (a phone that has not played to this receiver

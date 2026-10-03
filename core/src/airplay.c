@@ -180,7 +180,8 @@ struct airplay_server {
  * encryption), without bits 40 (buffered audio) and 41 (PTP) in mode 1: this receiver cannot keep PTP time, which needs UDP ports
  * 319 and 320, so it offers realtime audio only. Mode 2 sets both, to see what a sender does with them (an iPhone then sends PTP
  * packets to ports nobody listens on and takes the buffered stream down again at once). Mode 3 sets bit 40 only: buffered audio
- * without PTP, which should make a sender use the old NTP timing. */
+ * without PTP, which should make a sender use the old NTP timing. Mode 4 sets bit 41 only: PTP timing without buffered audio, so that a
+ * sender should ask for the realtime stream (type 96) with the AirPlay 2 keys. */
 #define AP2_BUFFERED_BYTES (8 * 1024 * 1024)   /* audio that may wait in the receiver, told to the sender (shairport-sync says 8 MiB too) */
 #define FEATURES_AP2 0x00018040405FCA00ull   /* shairport-sync's set plus bit 15, the one that says artwork is wanted (Apple's own receivers have it) */
 
@@ -189,8 +190,10 @@ uint64_t airplay_features(const airplay_config_t *config) {
         uint64_t f = FEATURES_AP2;
         if (config->airplay2 == 2) {
             f |= (1ull << 40) | (1ull << 41);
-        } else if (config->airplay2 >= 3) {
+        } else if (config->airplay2 == 3) {
             f |= 1ull << 40;
+        } else if (config->airplay2 >= 4) {
+            f |= 1ull << 41;
         }
         return f;
     }
@@ -1688,7 +1691,7 @@ static void handle_set_parameter(airplay_server_t *s, conn_t *c, const rtsp_requ
                 dmap_track_t track;
                 memset(&track, 0, sizeof(track));
                 dmap_scan(req->body, req->body_len, 0, &track);
-                char outline[200] = "";
+                char outline[110] = "";
                 dmap_outline(req->body, req->body_len, 0, outline, sizeof(outline));
                 LOG_I(AIRPLAY, "track info: title %zu, artist %zu, album %zu bytes; fields %s", strlen(track.title), strlen(track.artist),
                       strlen(track.album), outline);
@@ -2513,13 +2516,13 @@ static void trace_request(conn_t *c, const rtsp_request_t *req) {
     }
     LOG_I(AIRPLAY, "request %s %.60s %s body %zu type %s ua %s proto %s", req->method, req->url, req->protocol, req->body_len,
           ct ? ct : "-", ua ? ua : "-", pv ? pv : "-");
-    /* a log line is short: the names of the headers go in pieces too */
-    for (size_t off = 0, part = 1; names[off]; off += 170, part++) {
-        LOG_I(AIRPLAY, "  headers %zu: %.170s", part, names + off);
+    /* a log line is short (a message is cut at 167 characters): the names of the headers go in pieces too */
+    for (size_t off = 0, part = 1; names[off]; off += 130, part++) {
+        LOG_I(AIRPLAY, "  headers %zu: %.130s", part, names + off);
     }
     /* a log line is short: the shape of a long body goes in pieces */
-    for (size_t off = 0, part = 1; shape[off]; off += 170, part++) {
-        LOG_I(AIRPLAY, "  body-shape %zu: %.170s", part, shape + off);
+    for (size_t off = 0, part = 1; shape[off]; off += 130, part++) {
+        LOG_I(AIRPLAY, "  body-shape %zu: %.130s", part, shape + off);
     }
 }
 
@@ -2538,8 +2541,8 @@ static void trace_reply(const conn_t *c, const rtsp_request_t *req, const rtsp_r
         }
     }
     LOG_I(AIRPLAY, "  -> %d, body %zu", reply->status, reply->body_len);
-    for (size_t off = 0, part = 1; shape[off]; off += 170, part++) {
-        LOG_I(AIRPLAY, "  -> shape %zu: %.170s", part, shape + off);
+    for (size_t off = 0, part = 1; shape[off]; off += 130, part++) {
+        LOG_I(AIRPLAY, "  -> shape %zu: %.130s", part, shape + off);
     }
 }
 
