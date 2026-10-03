@@ -128,6 +128,9 @@ class LgSessionTest {
         assertFalse(LgFacts.needsWake(reachable = true, powerState = "Active"))
         assertFalse(LgFacts.needsWake(reachable = true, powerState = null))
         assertFalse(LgFacts.needsWake(reachable = true, powerState = "Screen Off"))
+        // a TV on standby that takes the connection and closes it before it talks says no power state: that is asleep too
+        assertTrue(LgFacts.needsWake(reachable = true, powerState = null, talkFailed = true))
+        assertFalse(LgFacts.needsWake(reachable = true, powerState = "Active", talkFailed = true))
         assertTrue(LgFacts.isOnStandby("Active Standby"))
         assertFalse(LgFacts.isOnStandby(null))
     }

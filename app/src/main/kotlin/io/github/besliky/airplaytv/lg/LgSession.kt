@@ -150,8 +150,12 @@ object LgFacts {
     fun isOnStandby(state: String?): Boolean =
         state != null && (state.equals("Active Standby", ignoreCase = true) || state.equals("Suspend", ignoreCase = true))
 
-    /** Whether a session start has to wake the TV: it does not answer, or it answers but is on standby. */
-    fun needsWake(reachable: Boolean, powerState: String?): Boolean = !reachable || isOnStandby(powerState)
+    /**
+     * Whether a session start has to wake the TV: it does not answer, or it answers but is on standby. A TV on standby with its network
+     * kept up (quick start) takes the connection and then closes it before it talks: [talkFailed], with no power state, is that.
+     */
+    fun needsWake(reachable: Boolean, powerState: String?, talkFailed: Boolean = false): Boolean =
+        !reachable || isOnStandby(powerState) || (powerState == null && talkFailed)
 
     /** Whether the TV shows a picture in [state]. A TV that names no state is taken to. */
     fun showsPicture(state: String?): Boolean = state == null || state.equals("Active", ignoreCase = true)

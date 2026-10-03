@@ -131,9 +131,11 @@ class LgLink(private val context: Context, private val settings: Settings) {
             Probe.REFUSED -> Log.i(SERVICE, "LG the TV's address answers but not on its remote-control port: there is nothing to wake")
             Probe.OPEN -> {
                 val opened = ensureSession()
-                // a TV on standby with its network kept up (quick start) answers, but shows nothing
+                // a TV on standby with its network kept up (quick start) answers, but shows nothing: it says so, or it takes the
+                // connection and closes it before it talks (seen on the owner's C3, which is why the TV did not wake)
                 val state = opened?.let { askPowerState(it) }
-                if (LgFacts.isOnStandby(state)) {
+                if (LgFacts.needsWake(true, state, talkFailed = opened == null && talkFailedLikeStandby)) {
+                    if (state == null) Log.w(SERVICE, "LG the TV takes the connection and closes it: taken for standby, waking it")
                     if (settings.tvWake) wakeTv(holdPhone) else Log.i(SERVICE, "LG the TV is on standby and waking it is switched off")
                 }
             }
@@ -235,6 +237,9 @@ class LgLink(private val context: Context, private val settings: Settings) {
 
     private fun reachable(timeoutMs: Int = 1500): Boolean = probe(timeoutMs) == Probe.OPEN
 
+    /** The last try to open a session failed the way a TV on standby makes it fail (it took the connection and closed it, or did not answer). Worker only. */
+    private var talkFailedLikeStandby = false
+
     private fun ensureSession(): LgSession? {
         session?.takeIf { !it.closed }?.let { return it }
         val key = settings.lgClientKey.ifEmpty { null }
@@ -242,6 +247,7 @@ class LgLink(private val context: Context, private val settings: Settings) {
             is LgTv.SessionResult.Ready -> {
                 val opened = result.session
                 session = opened
+                talkFailedLikeStandby = false
                 opened.onClosed = { onSessionLost(opened) }
                 opened.subscribe("ssap://com.webos.applicationManager/getForegroundAppInfo") { message ->
                     work("foreground app") {
@@ -266,6 +272,7 @@ class LgLink(private val context: Context, private val settings: Settings) {
             }
             is LgTv.SessionResult.Stopped -> {
                 Log.w(SERVICE, "LG cannot talk to the TV: ${result.outcome}")
+                talkFailedLikeStandby = result.outcome is LgTv.Outcome.Failed || result.outcome is LgTv.Outcome.Unreachable
                 null
             }
         }
@@ -296,7 +303,8 @@ class LgLink(private val context: Context, private val settings: Settings) {
     /** Whether the TV is on and not on standby: its port answers and it does not say it is off. */
     private fun tvIsUp(): Boolean {
         if (!reachable(1000)) return false
-        val opened = ensureSession() ?: return true // it answers but will not talk: there is nothing more to ask it
+        // it answers but will not talk: a TV that closes the connection is still asleep, any other refusal leaves nothing to ask it
+        val opened = ensureSession() ?: return !talkFailedLikeStandby
         return !LgFacts.isOnStandby(askPowerState(opened))
     }
 

@@ -2,6 +2,11 @@
 
 ## [0.2.1] - fork
 
+- **rc.20.**
+  - **The TV is woken when it is on standby and closes the connection.** An LG on standby with its network kept up (quick start) takes the
+    receiver's connection and closes it before it talks. The receiver took that for "nothing to ask" and did not wake the TV (seen in the
+    owner's log: "LG cannot talk to the TV: the TV closed the connection" twice, no wake). Now a connection that is taken and closed without a
+    word counts as standby: the receiver wakes the TV, as it does for a TV that does not answer at all, and waits until the TV talks.
 - **rc.19.**
   - **The TV no longer stays on its home screen after the Menu button.** The TV's own menu closes by itself after a while; a key sent to
     it afterwards (Back, OK, or the Exit that closes the menu) could land on the input instead and send the TV to its LG home screen. While
