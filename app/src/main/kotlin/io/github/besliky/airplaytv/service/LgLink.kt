@@ -70,6 +70,7 @@ class LgLink(private val context: Context, private val settings: Settings) {
     private var tvReference = -1 // the TV's volume when the phone connected (the top of the slider), -1 until it is known
     private var tvLastSet = -1
     private var tvLastSetAt = 0L
+    private var tvRestoreTo = -1 // what the TV goes back to when the session ends: its volume at the start, or what its owner set on it since
     private var musicModeBroken = false
     private var waking = false
     private var lastHomeAt = 0L
@@ -106,6 +107,7 @@ class LgLink(private val context: Context, private val settings: Settings) {
         tvVolumeInCharge = false
         tvReference = -1
         tvLastSet = -1
+        tvRestoreTo = -1
         musicModeBroken = false
         when (probe()) {
             Probe.SILENT ->
@@ -133,6 +135,7 @@ class LgLink(private val context: Context, private val settings: Settings) {
         }
         tvReference = -1
         tvLastSet = -1
+        tvRestoreTo = -1
         awayChecked = false
         pausedByUs = false
         session?.close()
@@ -476,6 +479,7 @@ class LgLink(private val context: Context, private val settings: Settings) {
             }
             tvReference = facts.level
             tvLastSet = facts.level
+            tvRestoreTo = facts.level
             Log.i(SERVICE, "LG the TV's volume is ${facts.level}: the phone's slider moves it between 0 and that")
         }
         val target = TvVolume.target(VolumeLimits.apply(level, ceilingPercent()), tvReference)
@@ -511,15 +515,16 @@ class LgLink(private val context: Context, private val settings: Settings) {
         Log.i(SERVICE, "LG the volume was changed on the TV (now ${facts.level}): the top of the phone's slider is now $moved")
         tvReference = moved
         tvLastSet = facts.level
+        tvRestoreTo = facts.level
     }
 
-    /** The session is over: the TV goes back to the volume it had when the phone connected. */
+    /** The session is over: the TV goes back to the volume it had when the phone connected, or that its owner set on it since. */
     private fun restoreTvVolume() {
-        val reference = tvReference
-        if (!tvVolumeInCharge || tvVolumeBroken || reference <= 0 || tvLastSet == reference) return
+        val back = tvRestoreTo
+        if (!tvVolumeInCharge || tvVolumeBroken || back <= 0 || tvLastSet == back) return
         val opened = session?.takeIf { !it.closed } ?: return
-        val answer = opened.request("ssap://audio/setVolume", JSONObject().put("volume", reference))
-        Log.i(SERVICE, "LG the TV's volume goes back to $reference: ${if (LgSession.succeeded(answer)) "done" else "no answer"}")
+        val answer = opened.request("ssap://audio/setVolume", JSONObject().put("volume", back))
+        Log.i(SERVICE, "LG the TV's volume goes back to $back: ${if (LgSession.succeeded(answer)) "done" else "no answer"}")
     }
 
     private companion object {
