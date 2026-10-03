@@ -182,7 +182,7 @@ struct airplay_server {
  * packets to ports nobody listens on and takes the buffered stream down again at once). Mode 3 sets bit 40 only: buffered audio
  * without PTP, which should make a sender use the old NTP timing. */
 #define AP2_BUFFERED_BYTES (8 * 1024 * 1024)   /* audio that may wait in the receiver, told to the sender (shairport-sync says 8 MiB too) */
-#define FEATURES_AP2 0x00018040405F4A00ull
+#define FEATURES_AP2 0x00018040405FCA00ull   /* shairport-sync's set plus bit 15, the one that says artwork is wanted (Apple's own receivers have it) */
 
 uint64_t airplay_features(const airplay_config_t *config) {
     if (config->airplay2 > 0) {
