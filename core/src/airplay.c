@@ -2303,7 +2303,7 @@ static void trace_request(conn_t *c, const rtsp_request_t *req) {
     const char *ct = rtsp_header(req, "Content-Type");
     const char *ua = rtsp_header(req, "User-Agent");
     const char *pv = rtsp_header(req, "X-Apple-ProtocolVersion");
-    char names[200] = "";
+    char names[700] = "";
     for (int i = 0; i < req->header_count && strlen(names) + 30 < sizeof(names); i++) {
         size_t n = strlen(names);
         snprintf(names + n, sizeof(names) - n, "%s%.24s", i ? "," : "", req->headers[i].name);
@@ -2325,8 +2325,12 @@ static void trace_request(conn_t *c, const rtsp_request_t *req) {
             }
         }
     }
-    LOG_I(AIRPLAY, "request %s %.60s %s body %zu type %s ua %s proto %s headers %s", req->method, req->url, req->protocol, req->body_len,
-          ct ? ct : "-", ua ? ua : "-", pv ? pv : "-", names);
+    LOG_I(AIRPLAY, "request %s %.60s %s body %zu type %s ua %s proto %s", req->method, req->url, req->protocol, req->body_len,
+          ct ? ct : "-", ua ? ua : "-", pv ? pv : "-");
+    /* a log line is short: the names of the headers go in pieces too */
+    for (size_t off = 0, part = 1; names[off]; off += 170, part++) {
+        LOG_I(AIRPLAY, "  headers %zu: %.170s", part, names + off);
+    }
     /* a log line is short: the shape of a long body goes in pieces */
     for (size_t off = 0, part = 1; shape[off]; off += 170, part++) {
         LOG_I(AIRPLAY, "  body-shape %zu: %.170s", part, shape + off);
