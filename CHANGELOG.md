@@ -15,8 +15,10 @@
   of pairing, and by themselves whenever the receiver talks to the TV: the address from the TV, the input when exactly one connected input is
   named like a Fire TV (the TV's input list is logged, so a TV that names its inputs otherwise can be told by pressing TV Features, The
   Stick's TV Input). Settings, TV Features, Wake The TV.
-- **TV features:** the TV's own volume follows the phone's slider and the remote's volume keys when the TV lets it move (a TV whose sound
-  goes to a fixed output keeps the receiver's own volume); Music Mode turns the TV's screen off while only music plays and back on at the next
+- **TV features:** the TV's own volume follows the phone's slider and the remote's volume keys when the TV lets it move, between zero and
+  the volume the TV had when the phone connected (so a phone's slider can never take a TV that was at 15 to 70; a volume changed on the TV
+  with its own remote moves the top of the slider along, and the TV goes back to its own volume when the session ends); a TV whose sound
+  goes to a fixed output keeps the receiver's own volume; Music Mode turns the TV's screen off while only music plays and back on at the next
   key; Smart Pause pauses the phone when the TV is switched to another input or off.
 - **Volume limits** (Settings, Volume Limits): a maximum, a lower maximum between two hours at night, and a start level, so a song never
   begins loud. The whole slider is scaled into the ceiling.
