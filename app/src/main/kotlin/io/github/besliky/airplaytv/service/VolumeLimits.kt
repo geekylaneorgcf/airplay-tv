@@ -39,8 +39,5 @@ object VolumeLimits {
     fun startLevel(phoneLevel: Float, config: Config): Float =
         if (config.startPercent in MIN_PERCENT..99) minOf(phoneLevel, config.startPercent / 100f) else phoneLevel
 
-    /** What the TV's own volume (0 to 100) should be for [level] under [ceilingPercent]. */
-    fun tvVolume(level: Float, ceilingPercent: Int): Int = Math.round(apply(level, ceilingPercent) * 100f).coerceIn(0, 100)
-
     private const val MIN_PERCENT = 10
 }

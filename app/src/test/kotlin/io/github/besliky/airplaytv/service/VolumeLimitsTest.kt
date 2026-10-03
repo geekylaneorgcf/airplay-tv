@@ -54,12 +54,4 @@ class VolumeLimitsTest {
         assertEquals(0.3f, VolumeLimits.startLevel(0.8f, config), 0.0001f)
         assertEquals(0.2f, VolumeLimits.startLevel(0.2f, config), 0.0001f)
     }
-
-    @Test
-    fun `the TV's own volume follows the same scale`() {
-        assertEquals(60, VolumeLimits.tvVolume(1f, 60))
-        assertEquals(30, VolumeLimits.tvVolume(0.5f, 60))
-        assertEquals(0, VolumeLimits.tvVolume(0f, 60))
-        assertEquals(100, VolumeLimits.tvVolume(1f, 100))
-    }
 }
