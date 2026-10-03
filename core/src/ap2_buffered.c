@@ -38,6 +38,7 @@
 typedef struct {
     uint32_t seq;
     uint32_t ts;
+    uint32_t ssrc;
     size_t len;
     uint8_t *data;
 } entry_t;
@@ -79,12 +80,55 @@ struct ap2_buffered {
     bool ssrc_seen;
     uint32_t ssrc;
 
+    audio_format_t cur;                /* what the audio output is playing as; changes when the blocks do */
+
     uint8_t *rx;                       /* bytes of the TCP stream not yet made into a block */
     size_t rx_len;
 };
 
 bool ap2_seq_before(uint32_t a, uint32_t b) {
     return ((a - b) & SEQ_MASK) >= 0x400000u;
+}
+
+static void make_format(audio_format_t *f, int ct, int spf, int rate) {
+    memset(f, 0, sizeof(*f));
+    f->ct = ct;
+    f->samples_per_frame = spf;
+    f->sample_rate = rate;
+    f->channels = 2;
+    f->is_media = true;
+}
+
+bool ap2_format_for_code(uint64_t code, audio_format_t *out) {
+    switch (code) {
+    case 0x40000:
+        make_format(out, AUDIO_CT_ALAC, 352, 44100);
+        return true;
+    case 0x400000:
+        make_format(out, AUDIO_CT_AAC_LC, 1024, 44100);
+        return true;
+    case 0x800000:
+        make_format(out, AUDIO_CT_AAC_LC, 1024, 48000);
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool ap2_format_for_ssrc(uint32_t ssrc, audio_format_t *out) {
+    switch (ssrc) {
+    case 0x0000face: /* the id shairport-sync gives ALAC at 44100 Hz */
+        make_format(out, AUDIO_CT_ALAC, 352, 44100);
+        return true;
+    case 0x16000000:
+        make_format(out, AUDIO_CT_AAC_LC, 1024, 44100);
+        return true;
+    case 0x17000000:
+        make_format(out, AUDIO_CT_AAC_LC, 1024, 48000);
+        return true;
+    default:
+        return false;
+    }
 }
 
 /* with b->lock held */
@@ -241,7 +285,7 @@ static bool accept_block(ap2_buffered_t *b, const uint8_t *pkt, size_t len) {
     b->blocks_in++;
     bool flushed = is_flushed(b, seq);
     retire_flushes(b, seq);
-    if (flushed || clen > AUDIO_SLOT_SIZE || b->count >= MAX_QUEUED) {
+    if (flushed || clen > MAX_BLOCK || b->count >= MAX_QUEUED) {
         pthread_mutex_unlock(&b->lock);
         free(plain);
         return true;
@@ -249,6 +293,7 @@ static bool accept_block(ap2_buffered_t *b, const uint8_t *pkt, size_t len) {
     entry_t *e = &b->queue[(b->head + b->count) % MAX_QUEUED];
     e->seq = seq;
     e->ts = ts;
+    e->ssrc = ssrc;
     e->len = clen;
     e->data = plain;
     b->count++;
@@ -303,6 +348,32 @@ static void read_stream(ap2_buffered_t *b) {
     }
 }
 
+/* A block says what it is. When that is another format than the audio output plays (the sender went from one song to the next and
+ * with it from AAC at 44100 Hz to AAC at 48000 Hz, say), the output is started again for the new one. Only this thread calls it. */
+static void switch_format_for(ap2_buffered_t *b, uint32_t ssrc) {
+    audio_format_t f;
+    if (!ap2_format_for_ssrc(ssrc, &f)) {
+        return;
+    }
+    if (f.ct == b->cur.ct && f.sample_rate == b->cur.sample_rate) {
+        return;
+    }
+    LOG_I(AUDIO, "AirPlay 2 buffered audio: the stream is now %s at %d Hz", f.ct == AUDIO_CT_ALAC ? "ALAC" : "AAC-LC", f.sample_rate);
+    if (b->p.ops->audio_stop) {
+        b->p.ops->audio_stop(b->p.ops_ctx);
+    }
+    pthread_mutex_lock(&b->lock);
+    b->cur = f;
+    b->reanchor = true;
+    pthread_mutex_unlock(&b->lock);
+    if (b->p.ops->audio_start && !b->p.ops->audio_start(b->p.ops_ctx, &f)) {
+        LOG_W(AUDIO, "audio output could not be started");
+    }
+    if (b->p.ops->audio_volume && b->p.volume_db) {
+        b->p.ops->audio_volume(b->p.ops_ctx, *b->p.volume_db);
+    }
+}
+
 /* Hands the blocks that are due to the audio output. Returns the nanoseconds until the next one is due, or 0 for "nothing pending". */
 static uint64_t deliver_due(ap2_buffered_t *b) {
     uint64_t next = 0;
@@ -314,7 +385,7 @@ static uint64_t deliver_due(ap2_buffered_t *b) {
         }
         entry_t *e = &b->queue[b->head];
         /* a block that ends before the anchor was played already (the sender buffered it before a seek or a pause) */
-        if (b->anchor_valid && (int32_t) (e->ts + (uint32_t) b->p.samples_per_frame - b->anchor_rtp) <= 0) {
+        if (b->anchor_valid && (int32_t) (e->ts + (uint32_t) b->cur.samples_per_frame - b->anchor_rtp) <= 0) {
             drop_head(b);
             pthread_mutex_unlock(&b->lock);
             continue;
@@ -325,7 +396,7 @@ static uint64_t deliver_due(ap2_buffered_t *b) {
             b->base_ns = now;
             b->base_ts = b->anchor_valid && (int32_t) (b->anchor_rtp - e->ts) > 0 ? b->anchor_rtp : e->ts;
         }
-        int64_t offset = (int64_t) (int32_t) (e->ts - b->base_ts) * (int64_t) NS_PER_SEC / b->p.sample_rate;
+        int64_t offset = (int64_t) (int32_t) (e->ts - b->base_ts) * (int64_t) NS_PER_SEC / b->cur.sample_rate;
         int64_t due_offset = offset - (int64_t) LEAD_NS;
         int64_t due = (int64_t) b->base_ns + (due_offset > 0 ? due_offset : 0);
         if (now > (uint64_t) due + RESTART_AFTER_NS) {
@@ -342,6 +413,7 @@ static uint64_t deliver_due(ap2_buffered_t *b) {
         uint8_t *data = e->data;
         size_t len = e->len;
         uint32_t ts = e->ts;
+        uint32_t ssrc = e->ssrc;
         e->data = NULL;
         b->queued_bytes -= len;
         b->head = (b->head + 1) % MAX_QUEUED;
@@ -349,6 +421,7 @@ static uint64_t deliver_due(ap2_buffered_t *b) {
         b->last_ts = ts;
         b->played = true;
         pthread_mutex_unlock(&b->lock);
+        switch_format_for(b, ssrc);
         stat_add(&g_stats.audio_packets_in, 1);
         if (b->p.ops->audio_frame) {
             b->p.ops->audio_frame(b->p.ops_ctx, data, len, ts, 0);
@@ -425,6 +498,7 @@ ap2_buffered_t *ap2_buffered_start(const ap2_buffered_params_t *params, size_t b
         return NULL;
     }
     b->p = *params;
+    b->cur = params->format;
     b->buffer_bytes = buffer_bytes;
     b->listen_fd = b->conn_fd = b->control_fd = -1;
     b->wake.rd = b->wake.wr = -1;

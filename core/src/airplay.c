@@ -1993,9 +1993,9 @@ static void ap2_handle_info(airplay_server_t *s, conn_t *c, rtsp_reply_t *reply)
     bp_dict_set(root, "sourceVersion", bp_new_string(s->cfg.srcvers));
     bp_node_t *formats = bp_new_dict();
     dict_set_uint(formats, "audioStream", 0x1440800);
-    /* the four formats shairport-sync names: ALAC and AAC-LC at 44100 Hz (bits 18, 22), ALAC and AAC-LC at 48000 Hz (bits 21, 23). With
-     * only one of them offered an iPhone did not start a stream at all. */
-    dict_set_uint(formats, "bufferStream", 0x40000ull | 0x400000ull | 0x200000ull | 0x800000ull);
+    /* ALAC and AAC-LC at 44100 Hz and AAC-LC at 48000 Hz: what the audio output plays. With ALAC alone offered an iPhone did not start a
+     * stream at all (a song that is AAC is not converted for it), and it chose AAC-LC at 48000 Hz when that was offered. */
+    dict_set_uint(formats, "bufferStream", 0x40000ull | 0x400000ull | 0x800000ull);
     bp_dict_set(root, "supportedFormats", formats);
     txt_entry_t entries[24];
     uint8_t txt[1024];
@@ -2056,12 +2056,16 @@ static session_t *ap2_begin_session(airplay_server_t *s, conn_t *c, bp_node_t *r
 static bp_node_t *setup_buffered_stream(airplay_server_t *s, session_t *session, bp_node_t *stream, const uint8_t *shk) {
     uint64_t format = 0;
     bp_get_uint(bp_dict_get(stream, "audioFormat"), &format);
-    uint64_t spf = 352;
+    uint64_t spf = 0;
     bp_get_uint(bp_dict_get(stream, "spf"), &spf);
     LOG_I(AUDIO, "AirPlay 2 buffered audio requested: format 0x%llx, spf %llu", (unsigned long long) format, (unsigned long long) spf);
-    if (format != 0 && !(format & 0x40000)) {
-        LOG_W(AUDIO, "AirPlay 2 buffered audio format 0x%llx is not offered (only ALAC 44100 Hz)", (unsigned long long) format);
+    audio_format_t f;
+    if (!ap2_format_for_code(format, &f)) {
+        LOG_W(AUDIO, "AirPlay 2 buffered audio format 0x%llx is not played here", (unsigned long long) format);
         return NULL;
+    }
+    if (spf >= 64 && spf <= 4096) {
+        f.samples_per_frame = (int) spf;
     }
     session_stop_audio(session);
 
@@ -2071,16 +2075,9 @@ static bp_node_t *setup_buffered_stream(airplay_server_t *s, session_t *session,
     p.ops_ctx = s->media_ctx;
     memcpy(p.key, shk, 32);
     p.peer = session->owner->peer;
-    p.samples_per_frame = (spf > 0 && spf <= 4096) ? (int) spf : 352;
-    p.sample_rate = 44100;
+    p.format = f;
+    p.volume_db = &s->volume_db;
 
-    audio_format_t f;
-    memset(&f, 0, sizeof(f));
-    f.ct = AUDIO_CT_ALAC;
-    f.samples_per_frame = p.samples_per_frame;
-    f.sample_rate = 44100;
-    f.channels = 2;
-    f.is_media = true;
     if (s->media->audio_start && !s->media->audio_start(s->media_ctx, &f)) {
         LOG_W(AUDIO, "audio output could not be started");
     }
@@ -2097,8 +2094,9 @@ static bp_node_t *setup_buffered_stream(airplay_server_t *s, session_t *session,
         }
         return NULL;
     }
-    atomic_store_explicit(&g_stats.audio_ct, AUDIO_CT_ALAC, memory_order_relaxed);
-    LOG_I(AUDIO, "AirPlay 2 buffered audio stream set up (ALAC, spf=%d)", p.samples_per_frame);
+    atomic_store_explicit(&g_stats.audio_ct, f.ct, memory_order_relaxed);
+    LOG_I(AUDIO, "AirPlay 2 buffered audio stream set up (%s, %d Hz, spf=%d)", f.ct == AUDIO_CT_ALAC ? "ALAC" : "AAC-LC", f.sample_rate,
+          f.samples_per_frame);
     bp_node_t *out = bp_new_dict();
     dict_set_uint(out, "type", 103);
     dict_set_uint(out, "dataPort", dport);

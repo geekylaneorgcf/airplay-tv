@@ -160,6 +160,9 @@ static void b_frame(void *ctx, const uint8_t *d, size_t len, uint32_t ts, uint64
     if (g_bn < 400) g_bts[g_bn++] = ts;
     pthread_mutex_unlock(&g_bl);
 }
+static int g_bstarts, g_bstops, g_brate;
+static bool b_start(void *ctx, const audio_format_t *f) { (void) ctx; pthread_mutex_lock(&g_bl); g_bstarts++; g_brate = f->sample_rate; pthread_mutex_unlock(&g_bl); return true; }
+static void b_stop(void *ctx) { (void) ctx; pthread_mutex_lock(&g_bl); g_bstops++; pthread_mutex_unlock(&g_bl); }
 static void b_flush(void *ctx) { (void) ctx; pthread_mutex_lock(&g_bl); g_bflushes++; pthread_mutex_unlock(&g_bl); }
 
 static int b_count(void) { pthread_mutex_lock(&g_bl); int n = g_bn; pthread_mutex_unlock(&g_bl); return n; }
@@ -174,11 +177,11 @@ static bool b_wait(int target, int ms) {
 }
 
 /* One sealed block as the sender writes it: [len BE16][seq][ts][ssrc][cipher+tag][nonce]. */
-static size_t b_block(uint8_t *out, const uint8_t key[32], uint32_t seq, uint32_t ts, uint64_t counter) {
+static size_t b_block_ssrc(uint8_t *out, const uint8_t key[32], uint32_t seq, uint32_t ts, uint64_t counter, uint32_t ssrc) {
     uint8_t plain[64];
     memset(plain, (int) (seq & 0xff), sizeof(plain));
     uint8_t *pkt = out + 2;
-    wr32be(pkt, seq); wr32be(pkt + 4, ts); wr32be(pkt + 8, 0xface);
+    wr32be(pkt, seq); wr32be(pkt + 4, ts); wr32be(pkt + 8, ssrc);
     uint8_t nonce[12] = { 0 };
     for (int i = 0; i < 8; i++) nonce[4 + i] = (uint8_t) (counter >> (8 * i));
     ap2_aead_seal(key, nonce, pkt + 4, 8, plain, sizeof(plain), pkt + 12, pkt + 12 + sizeof(plain));
@@ -187,6 +190,22 @@ static size_t b_block(uint8_t *out, const uint8_t key[32], uint32_t seq, uint32_
     out[0] = (uint8_t) (total >> 8);
     out[1] = (uint8_t) total;
     return total;
+}
+
+static size_t b_block(uint8_t *out, const uint8_t key[32], uint32_t seq, uint32_t ts, uint64_t counter) {
+    return b_block_ssrc(out, key, seq, ts, counter, 0xface);
+}
+
+TEST(ap2_stream_formats) {
+    audio_format_t f;
+    CHECK(ap2_format_for_code(0x40000, &f) && f.ct == AUDIO_CT_ALAC && f.sample_rate == 44100 && f.samples_per_frame == 352);
+    CHECK(ap2_format_for_code(0x400000, &f) && f.ct == AUDIO_CT_AAC_LC && f.sample_rate == 44100 && f.samples_per_frame == 1024);
+    CHECK(ap2_format_for_code(0x800000, &f) && f.ct == AUDIO_CT_AAC_LC && f.sample_rate == 48000);
+    CHECK(!ap2_format_for_code(0x200000, &f));      /* ALAC 48000 Hz 24 bit: not played */
+    CHECK(!ap2_format_for_code(0, &f));
+    CHECK(ap2_format_for_ssrc(0x17000000, &f) && f.sample_rate == 48000);
+    CHECK(ap2_format_for_ssrc(0x16000000, &f) && f.sample_rate == 44100 && f.ct == AUDIO_CT_AAC_LC);
+    CHECK(!ap2_format_for_ssrc(0x15000000, &f));
 }
 
 TEST(ap2_seq_order_wraps_at_23_bits) {
@@ -204,6 +223,8 @@ TEST(ap2_buffered_orders_paces_and_flushes) {
     memset(&ops, 0, sizeof(ops));
     ops.audio_frame = b_frame;
     ops.audio_flush = b_flush;
+    ops.audio_start = b_start;
+    ops.audio_stop = b_stop;
     uint8_t key[32];
     memset(key, 0x5a, sizeof(key));
     ap2_buffered_params_t p;
@@ -213,8 +234,10 @@ TEST(ap2_buffered_orders_paces_and_flushes) {
     struct sockaddr_in *peer = (struct sockaddr_in *) &p.peer;
     peer->sin_family = AF_INET;
     peer->sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    p.samples_per_frame = 352;
-    p.sample_rate = 44100;
+    p.format.ct = AUDIO_CT_ALAC;
+    p.format.samples_per_frame = 352;
+    p.format.sample_rate = 44100;
+    p.format.channels = 2;
     uint16_t dport = 0, cport = 0;
     ap2_buffered_t *b = ap2_buffered_start(&p, 1 << 20, &dport, &cport);
     CHECK(b != NULL);
@@ -261,6 +284,57 @@ TEST(ap2_buffered_orders_paces_and_flushes) {
     CHECK(b_wait(stopped + 1, 1000));
     pthread_mutex_lock(&g_bl);
     CHECK_EQ(g_bts[stopped], 5000 + 185 * 352);
+    pthread_mutex_unlock(&g_bl);
+    close(fd);
+    ap2_buffered_stop(b);
+}
+
+TEST(ap2_buffered_follows_a_change_of_format) {
+    g_bn = 0;
+    g_bstarts = g_bstops = g_brate = 0;
+    media_sink_ops_t ops;
+    memset(&ops, 0, sizeof(ops));
+    ops.audio_frame = b_frame;
+    ops.audio_start = b_start;
+    ops.audio_stop = b_stop;
+    uint8_t key[32];
+    memset(key, 0x33, sizeof(key));
+    ap2_buffered_params_t p;
+    memset(&p, 0, sizeof(p));
+    p.ops = &ops;
+    memcpy(p.key, key, 32);
+    struct sockaddr_in *peer = (struct sockaddr_in *) &p.peer;
+    peer->sin_family = AF_INET;
+    peer->sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    ap2_format_for_code(0x400000, &p.format);       /* the stream starts as AAC-LC at 44100 Hz */
+    uint16_t dport = 0, cport = 0;
+    ap2_buffered_t *b = ap2_buffered_start(&p, 1 << 20, &dport, &cport);
+    CHECK(b != NULL);
+    if (!b) return;
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    struct sockaddr_in to;
+    memset(&to, 0, sizeof(to));
+    to.sin_family = AF_INET;
+    to.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    to.sin_port = htons(dport);
+    CHECK(connect(fd, (struct sockaddr *) &to, sizeof(to)) == 0);
+    uint8_t buf[256];
+    /* ten blocks of what the stream said it is, then ten of AAC-LC at 48000 Hz */
+    for (uint32_t i = 0; i < 10; i++) {
+        size_t n = b_block_ssrc(buf, key, 10 + i, 1000 + i * 1024, i + 1, 0x16000000);
+        CHECK(write(fd, buf, n) == (ssize_t) n);
+    }
+    for (uint32_t i = 10; i < 20; i++) {
+        size_t n = b_block_ssrc(buf, key, 10 + i, 1000 + i * 1024, i + 1, 0x17000000);
+        CHECK(write(fd, buf, n) == (ssize_t) n);
+    }
+    b_sleep(50);
+    ap2_buffered_rate(b, true, 1000, true);
+    CHECK(b_wait(20, 2000));
+    pthread_mutex_lock(&g_bl);
+    CHECK_EQ(g_bstarts, 1);     /* restarted once, for the new rate */
+    CHECK_EQ(g_bstops, 1);
+    CHECK_EQ(g_brate, 48000);
     pthread_mutex_unlock(&g_bl);
     close(fd);
     ap2_buffered_stop(b);

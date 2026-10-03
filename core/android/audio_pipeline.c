@@ -33,7 +33,7 @@
 #include "log.h"
 #include "platform.h"
 
-#define SAMPLE_RATE 44100
+#define DEFAULT_RATE 44100
 #define CHANNELS 2
 #define FRAME_BYTES (CHANNELS * 2)
 #define RING_SECONDS 2
@@ -43,6 +43,7 @@ static struct {
     pthread_cond_t cond;
     bool active;
     int ct;
+    int rate;              /* the sample rate of this session's audio: 44100 or 48000 */
     AMediaCodec *aac;
     alac_file *alac;
     int16_t *pcm;          /* decode scratch buffer */
@@ -62,14 +63,28 @@ static struct {
 } g_ap = { .lock = PTHREAD_MUTEX_INITIALIZER, .cond = PTHREAD_COND_INITIALIZER };
 
 static const uint8_t kAscAacEld[] = { 0xf8, 0xe8, 0x50, 0x00 };  /* ELD, 44.1 kHz, stereo, 480 */
-static const uint8_t kAscAacLc[] = { 0x12, 0x10 };               /* LC, 44.1 kHz, stereo */
 
-static AMediaCodec *create_aac_decoder(int ct) {
+/* The AudioSpecificConfig of AAC-LC stereo: 5 bits of object type (2), 4 of the sampling frequency index, 4 of channels (2). */
+static int aac_frequency_index(int rate) {
+    static const int kRates[] = { 96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000 };
+    for (int i = 0; i < (int) (sizeof(kRates) / sizeof(kRates[0])); i++) {
+        if (kRates[i] == rate) {
+            return i;
+        }
+    }
+    return 4;
+}
+
+static AMediaCodec *create_aac_decoder(int ct, int rate) {
+    uint8_t lc[2];
+    int index = aac_frequency_index(rate);
+    lc[0] = (uint8_t) ((2 << 3) | (index >> 1));
+    lc[1] = (uint8_t) (((index & 1) << 7) | (CHANNELS << 3));
     /* The platform software decoder supports ELD everywhere; vendor decoders often do not. */
     static const char *const kNames[] = { "c2.android.aac.decoder", "OMX.google.aac.decoder" };
     AMediaFormat *f = AMediaFormat_new();
     AMediaFormat_setString(f, AMEDIAFORMAT_KEY_MIME, "audio/mp4a-latm");
-    AMediaFormat_setInt32(f, AMEDIAFORMAT_KEY_SAMPLE_RATE, SAMPLE_RATE);
+    AMediaFormat_setInt32(f, AMEDIAFORMAT_KEY_SAMPLE_RATE, rate);
     AMediaFormat_setInt32(f, AMEDIAFORMAT_KEY_CHANNEL_COUNT, CHANNELS);
     AMediaFormat_setInt32(f, AMEDIAFORMAT_KEY_IS_ADTS, 0);
     if (ct == AUDIO_CT_AAC_ELD) {
@@ -77,7 +92,7 @@ static AMediaCodec *create_aac_decoder(int ct) {
         AMediaFormat_setBuffer(f, "csd-0", (void *) kAscAacEld, sizeof(kAscAacEld));
     } else {
         AMediaFormat_setInt32(f, AMEDIAFORMAT_KEY_AAC_PROFILE, 2);
-        AMediaFormat_setBuffer(f, "csd-0", (void *) kAscAacLc, sizeof(kAscAacLc));
+        AMediaFormat_setBuffer(f, "csd-0", (void *) lc, sizeof(lc));
     }
     AMediaCodec *codec = NULL;
     for (size_t i = 0; i <= sizeof(kNames) / sizeof(kNames[0]); i++) {
@@ -133,7 +148,7 @@ static void ring_write_locked(const int16_t *pcm, size_t frames) {
     if (g_ap.prebuffering && g_ap.fill >= g_ap.target_frames) {
         g_ap.prebuffering = false;
     }
-    atomic_store_explicit(&g_stats.audio_buffer_ms, (int32_t) (g_ap.fill * 1000 / SAMPLE_RATE),
+    atomic_store_explicit(&g_stats.audio_buffer_ms, (int32_t) (g_ap.fill * 1000 / (size_t) g_ap.rate),
                           memory_order_relaxed);
     pthread_cond_signal(&g_ap.cond);
 }
@@ -142,13 +157,16 @@ bool ap_start(const audio_format_t *format) {
     bool low_latency = format->ct == AUDIO_CT_AAC_ELD;
     pthread_mutex_lock(&g_ap.lock);
     g_ap.ct = format->ct;
-    g_ap.ring_frames = SAMPLE_RATE * RING_SECONDS;
+    /* 44100 for everything AirPlay 1 sends; AirPlay 2 may send 48000 Hz audio too */
+    g_ap.rate = format->sample_rate >= 8000 && format->sample_rate <= 96000 ? format->sample_rate : DEFAULT_RATE;
+    size_t rate = (size_t) g_ap.rate;
+    g_ap.ring_frames = rate * RING_SECONDS;
     g_ap.ring = (int16_t *) calloc(g_ap.ring_frames, FRAME_BYTES);
     g_ap.pcm_cap = ALAC_MAX_FRAME_SAMPLES * CHANNELS;
     g_ap.pcm = (int16_t *) calloc(g_ap.pcm_cap, sizeof(int16_t));
     /* Mirroring favours latency; music favours smooth playback over Wi-Fi. */
-    g_ap.target_frames = low_latency ? SAMPLE_RATE * 40 / 1000 : SAMPLE_RATE * 250 / 1000;
-    g_ap.max_frames = low_latency ? SAMPLE_RATE * 150 / 1000 : SAMPLE_RATE * 700 / 1000;
+    g_ap.target_frames = low_latency ? rate * 40 / 1000 : rate * 250 / 1000;
+    g_ap.max_frames = low_latency ? rate * 150 / 1000 : rate * 700 / 1000;
     ring_reset_locked();
     g_ap.pts_us = 0;
 
@@ -158,7 +176,7 @@ bool ap_start(const audio_format_t *format) {
         int spf = format->samples_per_frame > 0 ? format->samples_per_frame : 352;
         ok = g_ap.alac && alac_set_config(g_ap.alac, (uint32_t) spf, 16, 40, 10, 14) == 0;
     } else if (ok) {
-        g_ap.aac = create_aac_decoder(format->ct);
+        g_ap.aac = create_aac_decoder(format->ct, g_ap.rate);
         ok = g_ap.aac != NULL;
     }
     if (!ok) {
@@ -177,9 +195,9 @@ bool ap_start(const audio_format_t *format) {
     g_ap.empty_since_ms = 0;
     g_ap.active = true;
     pthread_mutex_unlock(&g_ap.lock);
-    LOG_I(AUDIO, "audio output started (%s)", format->ct == AUDIO_CT_ALAC ? "ALAC"
-                                              : format->ct == AUDIO_CT_AAC_ELD ? "AAC-ELD" : "AAC-LC");
-    platform_on_audio_started(SAMPLE_RATE, CHANNELS, low_latency);
+    LOG_I(AUDIO, "audio output started (%s, %d Hz)", format->ct == AUDIO_CT_ALAC ? "ALAC"
+                                                     : format->ct == AUDIO_CT_AAC_ELD ? "AAC-ELD" : "AAC-LC", g_ap.rate);
+    platform_on_audio_started(g_ap.rate, CHANNELS, low_latency);
     return true;
 }
 

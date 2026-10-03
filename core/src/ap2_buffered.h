@@ -28,8 +28,8 @@ typedef struct {
     void *ops_ctx;
     uint8_t key[32];                  /* the stream's "shk" */
     struct sockaddr_storage peer;     /* only this host may connect */
-    int samples_per_frame;
-    int sample_rate;
+    audio_format_t format;            /* what the stream starts as; a block can say it is something else (see ap2_format_for_ssrc) */
+    const volatile float *volume_db;  /* the volume to give the audio output again when it is restarted for another format, may be NULL */
 } ap2_buffered_params_t;
 
 /* Opens the TCP port the sender connects to (and a UDP port it may send timing packets to, which are ignored) and starts the thread.
@@ -49,6 +49,13 @@ void ap2_buffered_flush(ap2_buffered_t *b, bool have_from, uint32_t from_seq, ui
 bool ap2_buffered_position(ap2_buffered_t *b, uint32_t *rtp);
 
 /* ---- pieces exposed for tests ---- */
+
+/* The formats of the stream setup's "audioFormat" bit: ALAC 44100 Hz (bit 18), AAC-LC 44100 Hz (bit 22), AAC-LC 48000 Hz (bit 23 of
+ * the list, 0x800000). False for the others (ALAC at 48000 Hz and 24 bits, surround), which the audio output does not play. */
+bool ap2_format_for_code(uint64_t code, audio_format_t *out);
+
+/* The same for the codec id that every block carries (the SSRC field), as shairport-sync names them. */
+bool ap2_format_for_ssrc(uint32_t ssrc, audio_format_t *out);
 
 /* True when a comes before b in the 23-bit sequence space. */
 bool ap2_seq_before(uint32_t a, uint32_t b);
