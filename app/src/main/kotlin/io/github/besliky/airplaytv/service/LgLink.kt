@@ -50,6 +50,9 @@ class LgLink(private val context: Context, private val settings: Settings) {
 
     private val worker = Executors.newSingleThreadScheduledExecutor { Thread(it, "lg-link").apply { isDaemon = true } }
 
+    // asking the phone to pause can take seconds (its remote service may not be known yet), and must not hold up waiting for the TV
+    private val pauser = Executors.newSingleThreadExecutor { Thread(it, "lg-pause").apply { isDaemon = true } }
+
     @Volatile
     private var session: LgSession? = null
 
@@ -57,6 +60,8 @@ class LgLink(private val context: Context, private val settings: Settings) {
     private var currentApp: String? = null
     private var powerState: String? = null
     private var screenOffByUs = false
+
+    @Volatile
     private var pausedByUs = false
     private var awayChecked = false
     private var tvVolumeBroken = false
@@ -168,6 +173,7 @@ class LgLink(private val context: Context, private val settings: Settings) {
         sessionOpen = false
         session?.close()
         session = null
+        pauser.shutdownNow()
         worker.shutdownNow()
     }
 
@@ -274,7 +280,7 @@ class LgLink(private val context: Context, private val settings: Settings) {
                 return
             }
             Log.i(SERVICE, "LG the TV is off: waking it (${if (homed) "Home press" else "no Home press"}, ${macs.size} network address(es))")
-            if (holdPhone) pausePhone("waiting for the TV", force = true)
+            val pausing = if (holdPhone) pauser.submit(Runnable { pausePhone("waiting for the TV", force = true) }) else null
             var attempt = 1
             while (sessionOpen && SystemClock.elapsedRealtime() - started < WAKE_WAIT_MS) {
                 if (macs.isNotEmpty() && attempt % 4 == 0) Wol.send(macs, broadcastAddresses())
@@ -285,6 +291,7 @@ class LgLink(private val context: Context, private val settings: Settings) {
             if (!sessionOpen) return
             if (!tvIsUp()) {
                 Log.w(SERVICE, "LG the TV did not wake in ${WAKE_WAIT_MS / 1000} s: is HDMI-CEC (SimpLink) on in the TV's settings, and, for the network way, \"Turn on via Wi-Fi\"?")
+                finishPausing(pausing)
                 resumePhone()
                 return
             }
@@ -293,9 +300,20 @@ class LgLink(private val context: Context, private val settings: Settings) {
             switchToStick(opened)
             // the picture and sound need a moment to settle after the TV's input changes
             Thread.sleep(SETTLE_MS)
+            finishPausing(pausing)
             resumePhone()
         } finally {
             waking = false
+        }
+    }
+
+    /** Lets the attempts to pause the phone finish (they were running while the TV woke), so that it is not asked to go on before it was asked to wait. */
+    private fun finishPausing(pausing: java.util.concurrent.Future<*>?) {
+        if (pausing == null) return
+        try {
+            pausing.get(3, TimeUnit.SECONDS)
+        } catch (_: Exception) {
+            pausing.cancel(true)
         }
     }
 
