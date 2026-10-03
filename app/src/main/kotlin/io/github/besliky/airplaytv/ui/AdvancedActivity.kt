@@ -128,7 +128,9 @@ class AdvancedActivity : SettingsPage() {
     /** AirPlay 2 for music is a trial that undoes itself (see [Settings.airplay2]): off, then on, then on with the timing bits. */
     private fun toggleAirplay2() {
         when (settings.airplay2) {
-            Settings.AIRPLAY2_OFF -> Dialogs.confirm(this, R.string.dialog_airplay2_title, R.string.dialog_airplay2_message, R.string.dialog_airplay2_confirm) {
+            Settings.AIRPLAY2_OFF -> if (settings.requirePin) {
+                Dialogs.message(this, getString(R.string.setting_airplay2), getString(R.string.airplay2_needs_no_pin))
+            } else Dialogs.confirm(this, R.string.dialog_airplay2_title, R.string.dialog_airplay2_message, R.string.dialog_airplay2_confirm) {
                 settings.airplay2TrialUntil = System.currentTimeMillis() + AIRPLAY2_TRIAL_MS
                 settings.airplay2 = Settings.AIRPLAY2_ON
                 bind()

@@ -59,6 +59,7 @@
     <string name="dialog_airplay2_title">Try AirPlay 2 for music?</string>
     <string name="dialog_airplay2_message">The receiver offers music to iPhones the AirPlay 2 way, which is what lets the volume buttons and the slider follow each other. With this on, only music works: screen mirroring, photos and video are not offered. If no iPhone starts a session within 30 minutes, it switches back by itself. You can switch it off here at any time.</string>
     <string name="dialog_airplay2_confirm">Try It</string>
+    <string name="airplay2_needs_no_pin">AirPlay 2 pairs without a PIN, so it cannot be used while a PIN is required. Switch the PIN off first.</string>
     <string name="setting_diagnostics">Export Diagnostics</string>
     <string name="setting_reset_pairing">Reset Pairing</string>
     <string name="setting_paired_devices">Paired Devices</string>

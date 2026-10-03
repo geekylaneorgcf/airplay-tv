@@ -33,20 +33,21 @@ static const media_sink_ops_t kOps = {
 };
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
-    static airplay_server_t *s[2];
+    static airplay_server_t *s[3];
     if (!s[0]) {
         signal(SIGPIPE, SIG_IGN);
         log_set_sink(quiet);
         log_set_level(LOGL_ERROR);
-        for (int i = 0; i < 2; i++) {
+        for (int i = 0; i < 3; i++) {
             airplay_config_t cfg;
             memset(&cfg, 0, sizeof(cfg));
             memcpy(cfg.name, "Fuzz TV", 8);
             cfg.require_pin = i == 1;
+            cfg.airplay2 = i == 2 ? 1 : 0;
             memset(cfg.identity_seed, 7, sizeof(cfg.identity_seed));
             s[i] = airplay_server_create(&cfg, NULL, &kOps, NULL);
         }
     }
-    airplay_server_fuzz_input(s[size & 1], data, size);
+    airplay_server_fuzz_input(s[size % 3], data, size);
     return 0;
 }

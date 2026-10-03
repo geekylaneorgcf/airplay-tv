@@ -37,6 +37,7 @@
 struct pair_definition pair_client_fruit; /* never used: Apple TV verification needs libplist */
 
 static int g_fd = -1;
+static const char *g_abuse = ""; /* garbage, badtype, noshk, tamper, abrupt: what to do wrong, see main */
 static int g_cseq = 0;
 static struct pair_cipher_context *g_cipher = NULL;
 static uint8_t *g_wire = NULL;
@@ -188,7 +189,7 @@ static size_t alac_frame(uint8_t *out, int phase) {
 int main(int argc, char **argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
     if (argc < 3) {
-        fprintf(stderr, "usage: ap2_sender <ip> <port> [seconds] [--ntp] [--name NAME]\n");
+        fprintf(stderr, "usage: ap2_sender <ip> <port> [seconds] [--ntp] [--name NAME] [--abuse garbage|badtype|noshk|tamper|abrupt]\n");
         return 2;
     }
     int seconds = argc > 3 && argv[3][0] != '-' ? atoi(argv[3]) : 6;
@@ -199,6 +200,8 @@ int main(int argc, char **argv) {
             ntp = true;
         } else if (strcmp(argv[i], "--name") == 0 && i + 1 < argc) {
             name = argv[++i];
+        } else if (strcmp(argv[i], "--abuse") == 0 && i + 1 < argc) {
+            g_abuse = argv[++i];
         }
     }
     if (sodium_init() < 0) {
@@ -308,6 +311,21 @@ int main(int argc, char **argv) {
         }
     }
 
+    if (strcmp(g_abuse, "garbage") == 0) {
+        /* bytes that are no sealed frame: the receiver must close the connection and go on */
+        uint8_t junk[64];
+        randombytes_buf(junk, sizeof(junk));
+        junk[0] = 40;
+        junk[1] = 0;
+        send_all(junk, sizeof(junk));
+        uint8_t b[16];
+        struct pollfd pf = { .fd = g_fd, .events = POLLIN };
+        int pr = poll(&pf, 1, 3000);
+        ssize_t rr = pr > 0 ? read(g_fd, b, sizeof(b)) : -2;
+        printf("garbage: the connection was %s\n", rr == 0 ? "closed (good)" : rr < 0 && pr > 0 ? "reset (good)" : "NOT closed (bad)");
+        return rr <= 0 && pr > 0 ? 0 : 1;
+    }
+
     /* SETUP, second stage: one realtime audio stream */
     uint8_t shk[32];
     randombytes_buf(shk, sizeof(shk));
@@ -328,15 +346,23 @@ int main(int argc, char **argv) {
         bp_dict_set(s0, "isMedia", bp_new_bool(true));
         dset(s0, "latencyMax", 88200);
         dset(s0, "latencyMin", 11025);
-        bp_dict_set(s0, "shk", bp_new_data(shk, sizeof(shk)));
+        if (strcmp(g_abuse, "noshk") != 0) {
+            bp_dict_set(s0, "shk", bp_new_data(shk, sizeof(shk)));
+        }
         dset(s0, "spf", 352);
         dset(s0, "sr", 44100);
-        dset(s0, "type", 96);
+        dset(s0, "type", strcmp(g_abuse, "badtype") == 0 ? 103 : 96);
         bp_array_append(streams, s0);
         bp_dict_set(d, "streams", streams);
         bp_node_t *reply = NULL;
         int st = rtsp_plist("SETUP", "rtsp://127.0.0.1/12345", d, &reply);
         printf("SETUP 2 -> %d\n", st);
+        if (strcmp(g_abuse, "badtype") == 0 || strcmp(g_abuse, "noshk") == 0) {
+            size_t n = reply ? bp_count(bp_dict_get(reply, "streams")) : 0;
+            printf("%s: status %d, %zu streams set up (none expected)\n", g_abuse, st, n);
+            printf("TEARDOWN -> %d\n", rtsp("TEARDOWN", "rtsp://127.0.0.1/12345", NULL, NULL, 0, NULL, NULL));
+            return n == 0 ? 0 : 1;
+        }
         if (st != 200 || !reply) {
             return 1;
         }
@@ -397,6 +423,9 @@ int main(int argc, char **argv) {
         crypto_aead_chacha20poly1305_ietf_encrypt(pkt + 12, &clen, plain, plen, pkt + 4, 8, NULL, nonce, shk);
         memcpy(pkt + 12 + clen, nonce + 4, 8);
         nonce_counter++;
+        if (strcmp(g_abuse, "tamper") == 0 && i % 2 == 1) {
+            pkt[20] ^= 0x01; /* every second packet no longer authenticates */
+        }
         if (sendto(audio_fd, pkt, 12 + (size_t) clen + 8, 0, (struct sockaddr *) &to, sizeof(to)) < 0 && i < 3) {
             fprintf(stderr, "sendto fam=%d len=%d port=%d fd=%d: ", to.sin_family, (int) to.sin_len, ntohs(to.sin_port), audio_fd);
             perror("");
@@ -413,6 +442,10 @@ int main(int argc, char **argv) {
         }
     }
     printf("sent %d frames\n", frames);
+    if (strcmp(g_abuse, "abrupt") == 0) {
+        printf("abrupt: closing every socket without TEARDOWN\n");
+        return 0;
+    }
     printf("TEARDOWN -> %d\n", rtsp("TEARDOWN", "rtsp://127.0.0.1/12345", NULL, NULL, 0, NULL, NULL));
     (void) timing_port;
     return 0;

@@ -2720,6 +2720,11 @@ void airplay_server_fuzz_input(airplay_server_t *s, const uint8_t *data, size_t 
         c->rx_len = len;
         c->rx_cap = len;
     }
+    if (s->cfg.airplay2 > 0 && (len & 4)) {
+        /* as if the pairing had finished, so that the handlers behind it see the input too (for the inputs whose length has bit 2) */
+        uint8_t shared[AP2_SHARED_LEN] = { 0 };
+        ap2_cipher_init(&c->ap2c, shared, sizeof(shared), AP2_CHANNEL_CONTROL, true);
+    }
     s->conns[0] = c;
     process_rx(s, c);
     conn_close(s, 0);

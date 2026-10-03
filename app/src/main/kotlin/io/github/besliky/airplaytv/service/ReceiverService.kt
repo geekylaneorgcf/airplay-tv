@@ -475,7 +475,9 @@ class ReceiverService : Service(), NativeBridge.Listener {
             settings.deviceName.toByteArray(Charsets.UTF_8), id.deviceId, id.publicId, seed,
             settings.requirePin, DEFAULT_PORT, mode.width, mode.height, settings.frameRate, mode.hevc,
             "", "", // the receiver's own identity, an Apple TV: a different model string stops iOS from starting sessions
-            settings.airplayVideo, settings.airplay2,
+            settings.airplayVideo,
+            // AirPlay 2 pairs with a fixed code, so it cannot honour a PIN the owner asked for: the PIN wins
+            if (settings.requirePin) Settings.AIRPLAY2_OFF else settings.airplay2,
         )
         seed.fill(0)
         if (port <= 0) {
