@@ -2,6 +2,7 @@ package io.github.besliky.airplaytv
 
 import android.content.Context
 import android.content.SharedPreferences
+import io.github.besliky.airplaytv.lg.TvScenes
 
 /** User settings, stored in the app's private preferences. */
 class Settings(context: Context) {
@@ -95,6 +96,54 @@ class Settings(context: Context) {
     var tvMenuButton: Boolean
         get() = prefs.getBoolean(KEY_TV_MENU, false)
         set(value) = prefs.edit().putBoolean(KEY_TV_MENU, value).apply()
+
+    /** Pressing the Menu button twice opens the TV quick panel; a single press stays the TV's own settings (and waits a moment to see whether a second press follows). */
+    var tvPanelDoublePress: Boolean
+        get() = prefs.getBoolean(KEY_TV_PANEL_DOUBLE, true)
+        set(value) = prefs.edit().putBoolean(KEY_TV_PANEL_DOUBLE, value).apply()
+
+    /** What holding the Menu button does: 0 nothing, 1 the TV off and the stick asleep, 2 the quick panel, 3 the Game scene. Nothing unless chosen. */
+    var tvHoldAction: Int
+        get() = prefs.getInt(KEY_TV_HOLD, 0).coerceIn(0, 3)
+        set(value) = prefs.edit().putInt(KEY_TV_HOLD, value.coerceIn(0, 3)).apply()
+
+    /** Short notices over the screen (and on the TV for a sleep timer) for what the stick does to the TV: a scene, a sleep timer, a picture mode. */
+    var tvNotices: Boolean
+        get() = prefs.getBoolean(KEY_TV_NOTICES, true)
+        set(value) = prefs.edit().putBoolean(KEY_TV_NOTICES, value).apply()
+
+    /** Switch the TV's picture mode when it goes to a chosen input (and back when it leaves). Off unless chosen: it changes the TV's picture settings. */
+    var tvAutoPicture: Boolean
+        get() = prefs.getBoolean(KEY_TV_AUTO_PICTURE, false)
+        set(value) = prefs.edit().putBoolean(KEY_TV_AUTO_PICTURE, value).apply()
+
+    /** The input that [tvAutoPicture] watches: "ps5" (the one the TV names like a PlayStation) or `HDMI_1` to `HDMI_4`. */
+    var tvAutoPictureInput: String
+        get() = prefs.getString(KEY_TV_AUTO_INPUT, "ps5")?.takeIf { it in TvScenes.INPUT_CHOICES && it.isNotEmpty() } ?: "ps5"
+        set(value) = prefs.edit().putString(KEY_TV_AUTO_INPUT, value).apply()
+
+    /** The picture mode [tvAutoPicture] sets on that input, by the TV's name for it. */
+    var tvAutoPictureMode: String
+        get() = prefs.getString(KEY_TV_AUTO_MODE, "game")?.takeIf { it.isNotEmpty() } ?: "game"
+        set(value) = prefs.edit().putString(KEY_TV_AUTO_MODE, value).apply()
+
+    /** When the sleep timer ends, in milliseconds of the wall clock; 0 when none runs. Kept so that a restart of the app does not lose it. */
+    var tvSleepEndsAt: Long
+        get() = prefs.getLong(KEY_TV_SLEEP_ENDS, 0L)
+        set(value) = prefs.edit().putLong(KEY_TV_SLEEP_ENDS, value).apply()
+
+    /** A scene as the owner set it up (see [TvScenes]); the default when never changed. */
+    fun tvScene(id: String): TvScenes.Scene = TvScenes.parse(id, prefs.getString(KEY_TV_SCENE_PREFIX + id, null))
+
+    fun setTvScene(scene: TvScenes.Scene) {
+        prefs.edit().putString(KEY_TV_SCENE_PREFIX + scene.id, TvScenes.encode(scene)).apply()
+    }
+
+    fun resetTvScenes() {
+        val edit = prefs.edit()
+        for (id in TvScenes.IDS) edit.remove(KEY_TV_SCENE_PREFIX + id)
+        edit.apply()
+    }
 
     /** The LG TV's address on the local network; empty until found. */
     var lgHost: String
@@ -298,6 +347,14 @@ class Settings(context: Context) {
         const val KEY_MUSIC_MODE = "music_mode"
         const val KEY_SMART_PAUSE = "smart_pause"
         const val KEY_TV_VOLUME = "tv_volume"
+        const val KEY_TV_PANEL_DOUBLE = "tv_panel_double"
+        const val KEY_TV_HOLD = "tv_hold_action"
+        const val KEY_TV_NOTICES = "tv_notices"
+        const val KEY_TV_AUTO_PICTURE = "tv_auto_picture"
+        const val KEY_TV_AUTO_INPUT = "tv_auto_picture_input"
+        const val KEY_TV_AUTO_MODE = "tv_auto_picture_mode"
+        const val KEY_TV_SLEEP_ENDS = "tv_sleep_ends_at"
+        const val KEY_TV_SCENE_PREFIX = "tv_scene_"
         const val KEY_TV_LEFT_BEHIND = "tv_left_behind"
         const val KEY_VOLUME_MAX = "volume_max"
         const val KEY_VOLUME_NIGHT = "volume_night"

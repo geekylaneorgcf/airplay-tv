@@ -63,4 +63,19 @@
     <string name="video_failed">This video cannot be played here</string>
     <string name="setting_airplay_video">AirPlay Video</string>
     <string name="whats_new_title">What’s new in %1$s</string>
+    <string name="tv_panel_double">Double-Press Menu: Quick Panel</string>
+    <string name="tv_panel_double_hint">Pressing Menu twice opens a panel over the screen: scenes, input, picture mode, sound output, volume, screen off, a sleep timer and turning the TV off. A single press still opens the TV’s own settings, but waits a third of a second to see whether a second press follows. Switch this off and a single press acts at once.</string>
+    <string name="tv_hold">Hold Menu</string>
+    <string name="value_hold_tv_off">TV Off And Sleep</string>
+    <string name="value_hold_panel">Quick Panel</string>
+    <string name="value_hold_game">Game Scene</string>
+    <string name="tv_hold_hint">Holding the Menu button does this. TV Off And Sleep counts three seconds first, and any key cancels it.</string>
+    <string name="tv_notices">TV Notices</string>
+    <string name="tv_auto_picture">Auto Picture Mode</string>
+    <string name="tv_auto_picture_hint">When the TV goes to the chosen input, its picture mode is set to the chosen one. The TV keeps one picture mode per input, so nothing is put back when you leave. It changes your TV’s picture settings, so it is off until you switch it on.</string>
+    <string name="tv_auto_input">Auto Picture Input</string>
+    <string name="tv_auto_mode">Auto Picture Mode Is</string>
+    <string name="tv_scenes">TV Scenes</string>
+    <string name="tv_scenes_title">TV Scenes</string>
+    <string name="tv_scenes_reset">Reset Scenes</string>
 </resources>

@@ -368,6 +368,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
             }
         }
         UserKeys.listener = { lg.userKey() }
+        TvAutoPicture.start(this)
         lg.onHomePressed = { handler.postDelayed({ reopenScreens() }, REOPEN_AFTER_HOME_MS) }
         VideoPlayback.onScreenEnded = { handler.post { endUrlVideo(bySender = false) } }
         dacp = DacpClient(this).also { RemoteControl.client = it }
@@ -413,6 +414,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
         if (NativeBridge.listener === this) NativeBridge.listener = null
         stopVolumeWatch()
         UserKeys.listener = null
+        TvAutoPicture.stop()
         VideoPlayback.onScreenEnded = null
         lg.shutdown()
         effects.release()

@@ -3,13 +3,20 @@ package io.github.besliky.airplaytv.service
 import android.accessibilityservice.AccessibilityService
 import android.content.Intent
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.widget.Toast
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
+import io.github.besliky.airplaytv.R
+import io.github.besliky.airplaytv.Settings
 import io.github.besliky.airplaytv.lg.TvMenuMode
+import io.github.besliky.airplaytv.lg.TvSettings
 import io.github.besliky.airplaytv.ui.NowPlayingActivity
 
 /**
- * Lets the Menu button (the three bars next to Home) open the LG TV's quick settings in every app. Android
+ * Lets the Menu button (the three bars next to Home) open the LG TV's own settings in every app, and, pressed twice, the quick panel (see
+ * [TvPanel]); held, it does what the owner chose (nothing, unless chosen). Android
  * only lets an accessibility service see a key before the app in front of it does, so the button has to
  * be taken here; with the TV Settings Button off the service lets every key through untouched.
  *
@@ -22,6 +29,19 @@ import io.github.besliky.airplaytv.ui.NowPlayingActivity
 class MenuKeyService : AccessibilityService() {
 
     private var overlay: VolumeOverlay? = null
+    private var panel: TvPanel? = null
+    private lateinit var settings: Settings
+    private val main = Handler(Looper.getMainLooper())
+
+    /** Tells a single press of the Menu key from a double press and a hold, see [MenuGesture]. */
+    private val gesture = MenuGesture(
+        post = { delayMs, run -> main.postDelayed(run, delayMs) },
+        cancel = { run -> main.removeCallbacks(run) },
+        doublePressWanted = { settings.tvPanelDoublePress },
+        holdWanted = { settings.tvHoldAction != HOLD_NOTHING },
+        closeOpen = { closeOpen() },
+        onAction = { onMenuAction(it) },
+    )
     private var lastVolumeAt = 0L
     private var lastLevel = -1f
 
@@ -40,7 +60,12 @@ class MenuKeyService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        settings = Settings(this)
         overlay = VolumeOverlay(this)
+        panel = TvPanel(this)
+        TvNotices.attach(this, TvBanner(this))
+        TvActions.appContext = applicationContext
+        TvSleepTimer.resume(this)
         ReceiverState.observe(volumeListener)
     }
 
@@ -49,6 +74,9 @@ class MenuKeyService : AccessibilityService() {
         ReceiverState.remove(volumeListener)
         overlay?.remove()
         overlay = null
+        panel?.close()
+        panel = null
+        TvNotices.detach()
         return super.onUnbind(intent)
     }
 
@@ -57,15 +85,66 @@ class MenuKeyService : AccessibilityService() {
     override fun onInterrupt() = Unit
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
-        if (event.action == KeyEvent.ACTION_DOWN && !VolumeKeys.isVolumeKey(event.keyCode)) UserKeys.listener?.invoke()
+        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+            if (!VolumeKeys.isVolumeKey(event.keyCode)) UserKeys.listener?.invoke()
+            TvActions.onAnyKey()
+            TvSleepTimer.onKey(this)
+        }
         // The volume keys, while the receiver has asked for them (the TV owns the volume); otherwise they go on to the system.
         if (VolumeKeys.onKey(event.keyCode, event.action)) return true
-        // Menu opens the TV's menu; while it is open the arrow keys, OK and Back steer it. Every other key is left alone.
-        if (event.keyCode != KeyEvent.KEYCODE_MENU && !TvMenuMode.isActive) return false
+        // Menu: a press opens the TV's own menu, a double press the quick panel, a hold what the owner chose (see MenuGesture).
+        if (event.keyCode == KeyEvent.KEYCODE_MENU) {
+            if (!settings.tvMenuButton) return false
+            if (event.action == KeyEvent.ACTION_DOWN) gesture.onDown(event.repeatCount) else if (event.action == KeyEvent.ACTION_UP) gesture.onUp()
+            return true // the press and its release belong to the TV now
+        }
+        // While the panel is open it takes the arrow keys, OK and Back; while the TV's menu is open the same keys steer that.
+        if (panel?.isOpen == true) return panel?.onKey(event) == true
+        if (!TvMenuMode.isActive) return false
         return TvMenuMode.onKey(this, event)
     }
 
+    /** A press of Menu while the panel or the TV's menu is open closes it (and does nothing else). */
+    private fun closeOpen(): Boolean {
+        if (panel?.isOpen == true) {
+            panel?.close()
+            return true
+        }
+        if (TvMenuMode.isActive) {
+            TvMenuMode.toggle(this)
+            return true
+        }
+        return false
+    }
+
+    private fun onMenuAction(action: MenuGesture.Action) {
+        when (action) {
+            MenuGesture.Action.SINGLE -> TvMenuMode.toggle(this)
+            MenuGesture.Action.DOUBLE -> openPanel()
+            MenuGesture.Action.HOLD -> when (settings.tvHoldAction) {
+                HOLD_TV_OFF -> if (readyForTv()) TvActions.holdTvOff(this)
+                HOLD_PANEL -> openPanel()
+                HOLD_GAME -> if (readyForTv()) TvActions.applyScene(this, "game")
+            }
+        }
+    }
+
+    private fun readyForTv(): Boolean {
+        if (TvSettings.state(settings) == TvSettings.State.READY) return true
+        Toast.makeText(this, R.string.tv_menu_needs_setup, Toast.LENGTH_LONG).show()
+        return false
+    }
+
+    private fun openPanel() {
+        if (readyForTv()) panel?.open()
+    }
+
     companion object {
+        private const val HOLD_NOTHING = 0
+        private const val HOLD_TV_OFF = 1
+        private const val HOLD_PANEL = 2
+        private const val HOLD_GAME = 3
+
         @Volatile
         private var instance: MenuKeyService? = null
 

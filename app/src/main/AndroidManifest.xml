@@ -63,6 +63,10 @@
             android:exported="false" />
 
         <activity
+            android:name=".ui.TvScenesActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".ui.TakeoverActivity"
             android:excludeFromRecents="true"
             android:exported="false"

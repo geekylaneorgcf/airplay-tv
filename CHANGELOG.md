@@ -2,6 +2,27 @@
 
 ## [0.2.1] - fork
 
+- **rc.18.**
+  - **A quick panel for the LG TV, on a double press of the Menu button.** A single press still opens the TV's own settings (with the
+    arrow keys, OK and Back steering them), as before; pressing Menu twice opens a list over the screen: *LG TV Settings* (the same menu),
+    a *scene* (Movie, Game, Music, Night), the *input* (HDMI 2 · PS5, pinned by name), the *picture mode*, the *sound output*, the *volume*,
+    *Music Mode* (the TV's screen off while music plays), *Screen Off Now*, a *sleep timer* (30, 60 or 90 minutes) and *Turn The TV Off*
+    (asks twice). The top line says what the TV is doing now. Opening it only reads; nothing changes until a row is used. A single press
+    waits a third of a second to see whether a second follows; TV Features, Double-Press Menu switches the panel (and that wait) off.
+  - **Scenes** set the input, picture mode, sound output, a volume that is never raised (only lowered to "at most") and the screen in one
+    go; what each does is set under TV Features, TV Scenes. Defaults: Movie = Cinema picture; Game = the input the TV names like a PlayStation
+    and Game picture; Music = screen off; Night = Cinema picture and volume at most 8.
+  - **Sleep timer.** The TV goes to standby and the stick sleeps (a phone playing to it is let go first). Five minutes and one minute before
+    the end a notice shows on the stick's screen and as the TV's own toast (so a game or a film shows it too); any key in the last minute adds
+    15 minutes. It survives a restart of the app.
+  - **Hold Menu** (TV Features, Hold Menu; off unless chosen): TV off and the stick asleep after a three-second countdown that any key cancels,
+    the quick panel, or the Game scene.
+  - **TV Notices:** a short notice at the top of the screen for what the stick does to the TV (a scene, a sleep timer, a picture mode);
+    TV Features, TV Notices switches them off.
+  - **Auto Picture Mode** (off unless chosen): when the TV goes to the chosen input (PlayStation by name, or an HDMI number) its picture
+    mode is set to the chosen one. The TV keeps one picture mode per input, so nothing is put back on leaving.
+  - Picture mode is changed through the TV's settings service when the direct request is refused (newer webOS), and every change is read
+    back, so a TV that ignores it is reported, not assumed.
 - **rc.17.**
   - **No bars along the bottom of Now Playing.** The visualizer is off unless it is switched on in Settings, Visualizer.
 - **rc.16.**
