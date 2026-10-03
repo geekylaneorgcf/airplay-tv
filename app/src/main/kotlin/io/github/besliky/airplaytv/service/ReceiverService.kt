@@ -473,6 +473,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
             (if (mode.hevc) " HEVC" else "") + ", decoder ${selection.avcDecoder}")
 
         val seed = id.seedCopy()
+        applyTimingPeerExperiment()
         port = NativeBridge.nativeStart(
             settings.deviceName.toByteArray(Charsets.UTF_8), id.deviceId, id.publicId, seed,
             settings.requirePin, DEFAULT_PORT, mode.width, mode.height, settings.frameRate, mode.hevc,
@@ -568,6 +569,21 @@ class ReceiverService : Service(), NativeBridge.Listener {
      * An AirPlay 2 trial that no phone has started a session in by its deadline is undone, so a receiver that iOS does not use in
      * this mode never stays that way: the owner would only see that nothing plays. A session that starts confirms it.
      */
+    /** The debug build's experiment with the clock peer of the AirPlay 2 mode that has the PTP bit (see [Settings.airplay2TimingPeer]); the core reads it from the environment. */
+    private fun applyTimingPeerExperiment() {
+        try {
+            val peer = if (BuildConfig.DEBUG) settings.airplay2TimingPeer.trim() else ""
+            if (peer.isNotEmpty()) {
+                android.system.Os.setenv("AIRPLAYTV_TIMING_PEER", peer, true)
+                Log.i(SERVICE, "AirPlay 2 experiment: the clock peer is named as $peer")
+            } else {
+                android.system.Os.unsetenv("AIRPLAYTV_TIMING_PEER")
+            }
+        } catch (e: Exception) {
+            Log.w(SERVICE, "cannot set the clock peer experiment", e)
+        }
+    }
+
     private val airplay2TrialExpiry = Runnable { checkAirplay2Trial() }
 
     private fun checkAirplay2Trial() {

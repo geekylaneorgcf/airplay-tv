@@ -31,9 +31,10 @@ import org.json.JSONObject
  *   the owner's Home press does, and wake it over the network too when it can (Wake-on-LAN, needs the TV's setting "Turn on via Wi-Fi");
  *   then it puts the TV on this stick's input and asks the phone to wait with the music until the picture is up, so the first seconds
  *   are not lost.
- * - **The TV's own volume.** The phone's slider and the remote's volume keys move the TV's volume between zero and what it was when
- *   the phone connected (see [TvVolume]), when the TV lets it be moved; a TV that sends its sound to a fixed output does not, and then
- *   the receiver's own volume is the one that moves. The TV goes back to what it was when the session ends.
+ * - **The TV's own volume.** The TV keeps the volume it had when the phone connected, and the phone's slider and the remote's volume
+ *   keys turn it down from there and back up to it, never above (see [TvVolume]), when the TV lets it be moved; a TV that sends its
+ *   sound to a fixed output does not, and then the receiver's own volume is the one that moves. The TV goes back to what it was when
+ *   the session ends.
  * - **Music mode.** While only music plays the TV's screen goes off (the sound goes on) and comes back at the next key.
  * - **Smart pause.** The phone's music pauses when the TV is switched to another input or turned off.
  *
@@ -68,6 +69,10 @@ class LgLink(private val context: Context, private val settings: Settings) {
     private var tvVolumeBroken = false
     private var tvVolumeInCharge = false
     private var tvReference = -1 // the TV's volume when the phone connected (the top of the slider), -1 until it is known
+
+    // where the phone's slider stood when the session began (the first level of the session), -1 until it is known; set on the main thread
+    @Volatile
+    private var firstLevel = -1f
     private var tvLastSet = -1
     private var tvLastSetAt = 0L
     private var tvRestoreTo = -1 // what the TV goes back to when the session ends: its volume at the start, or what its owner set on it since
@@ -101,10 +106,15 @@ class LgLink(private val context: Context, private val settings: Settings) {
 
     // ---- events from the service
 
-    fun sessionStarted(holdPhone: Boolean = true) = work("session start") {
+    fun sessionStarted(holdPhone: Boolean = true) {
+        firstLevel = -1f // on the caller's thread, so that it is before the first level of the session
+        work("session start") { startSession(holdPhone) }
+    }
+
+    private fun startSession(holdPhone: Boolean) {
         // a session that follows closely on the last: the TV's volume goes back first, nothing is playing yet
         if (restorePending) finishSession()
-        if (!paired) return@work
+        if (!paired) return
         sessionOpen = true
         pausedByUs = false
         screenOffByUs = false
@@ -189,6 +199,7 @@ class LgLink(private val context: Context, private val settings: Settings) {
             work("tv volume off") { if (tvVolumeInCharge) giveBackTvVolume() }
             return
         }
+        if (firstLevel < 0f) firstLevel = level
         latestLevel = level
         if (volumeQueued.compareAndSet(false, true)) {
             work("volume") {
@@ -480,6 +491,12 @@ class LgLink(private val context: Context, private val settings: Settings) {
     private fun ceilingPercent(): Int =
         VolumeLimits.ceilingPercent(settings.volumeLimits(), Calendar.getInstance().get(Calendar.HOUR_OF_DAY))
 
+    /** The slider position that counts as the TV's own volume: where the phone's slider stood when the session began. */
+    private fun tvHome(level: Float): Float = TvVolume.home(if (firstLevel >= 0f) firstLevel else level)
+
+    /** The part of the TV's reference volume that the slider position [level] stands for. */
+    private fun tvFraction(level: Float): Float = TvVolume.fraction(level, tvHome(level), VolumeLimits.apply(1f, ceilingPercent()))
+
     private fun applyVolume(level: Float) {
         if (tvVolumeBroken || level < 0f || !sessionOpen) return
         val opened = session?.takeIf { !it.closed } ?: if (reachable()) ensureSession() else null
@@ -500,9 +517,9 @@ class LgLink(private val context: Context, private val settings: Settings) {
             tvReference = facts.level
             tvLastSet = facts.level
             tvRestoreTo = facts.level
-            Log.i(SERVICE, "LG the TV's volume is ${facts.level}: the phone's slider moves it between 0 and that")
+            Log.i(SERVICE, "LG the TV's volume is ${facts.level}: it stays there while the phone's slider stays where it began (${"%.2f".format(tvHome(level))}), and the slider turns it down from there")
         }
-        val target = TvVolume.target(VolumeLimits.apply(level, ceilingPercent()), tvReference)
+        val target = TvVolume.target(tvFraction(level), tvReference)
         if (tvVolumeInCharge && target == tvLastSet) return
         val answer = if (target == tvLastSet) null else opened.request("ssap://audio/setVolume", JSONObject().put("volume", target))
         if (answer != null && !LgSession.succeeded(answer)) {
@@ -531,7 +548,7 @@ class LgLink(private val context: Context, private val settings: Settings) {
         val facts = LgFacts.volume(message) ?: return
         if (facts.level == tvLastSet) return
         if (SystemClock.elapsedRealtime() - tvLastSetAt < OWN_CHANGE_ECHO_MS) return
-        val moved = TvVolume.referenceAfterTvChange(facts.level, VolumeLimits.apply(latestLevel, ceilingPercent())) ?: return
+        val moved = TvVolume.referenceAfterTvChange(facts.level, tvFraction(latestLevel)) ?: return
         Log.i(SERVICE, "LG the volume was changed on the TV (now ${facts.level}): the top of the phone's slider is now $moved")
         tvReference = moved
         tvLastSet = facts.level

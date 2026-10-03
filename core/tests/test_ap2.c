@@ -332,8 +332,79 @@ TEST(ap2_buffered_follows_a_change_of_format) {
     ap2_buffered_rate(b, true, 1000, true);
     CHECK(b_wait(20, 2000));
     pthread_mutex_lock(&g_bl);
-    CHECK_EQ(g_bstarts, 1);     /* restarted once, for the new rate */
+    CHECK_EQ(g_bstarts, 2);     /* started with the first block, and again for the new rate */
     CHECK_EQ(g_bstops, 1);
+    CHECK_EQ(g_brate, 48000);
+    pthread_mutex_unlock(&g_bl);
+    close(fd);
+    ap2_buffered_stop(b);
+}
+
+TEST(ap2_buffered_leaves_the_audio_output_alone_until_a_block_is_due) {
+    g_bn = 0;
+    g_bstarts = g_bstops = g_brate = 0;
+    media_sink_ops_t ops;
+    memset(&ops, 0, sizeof(ops));
+    ops.audio_frame = b_frame;
+    ops.audio_start = b_start;
+    ops.audio_stop = b_stop;
+    uint8_t key[32];
+    memset(key, 0x44, sizeof(key));
+    ap2_buffered_params_t p;
+    memset(&p, 0, sizeof(p));
+    p.ops = &ops;
+    memcpy(p.key, key, 32);
+    struct sockaddr_in *peer = (struct sockaddr_in *) &p.peer;
+    peer->sin_family = AF_INET;
+    peer->sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    ap2_format_for_code(0x800000, &p.format);
+    uint16_t dport = 0, cport = 0;
+    ap2_buffered_t *b = ap2_buffered_start(&p, 1 << 20, &dport, &cport);
+    CHECK(b != NULL);
+    if (!b) return;
+    CHECK(!ap2_buffered_output_started(b));
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    struct sockaddr_in to;
+    memset(&to, 0, sizeof(to));
+    to.sin_family = AF_INET;
+    to.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    to.sin_port = htons(dport);
+    CHECK(connect(fd, (struct sockaddr *) &to, sizeof(to)) == 0);
+    /* an idle route: the sender connects, sends a block or two ahead, and goes without ever saying "play" */
+    uint8_t buf[256];
+    for (uint32_t i = 0; i < 3; i++) {
+        size_t n = b_block_ssrc(buf, key, 50 + i, 9000 + i * 1024, i + 1, 0x17000000);
+        CHECK(write(fd, buf, n) == (ssize_t) n);
+    }
+    b_sleep(150);
+    CHECK(!ap2_buffered_output_started(b));
+    pthread_mutex_lock(&g_bl);
+    CHECK_EQ(g_bstarts, 0);
+    CHECK_EQ(g_bstops, 0);
+    pthread_mutex_unlock(&g_bl);
+    close(fd);
+    ap2_buffered_stop(b);
+    pthread_mutex_lock(&g_bl);
+    CHECK_EQ(g_bstarts, 0);
+    pthread_mutex_unlock(&g_bl);
+
+    /* the same, and then it plays: the output starts with the first block that is due, once */
+    b = ap2_buffered_start(&p, 1 << 20, &dport, &cport);
+    CHECK(b != NULL);
+    if (!b) return;
+    fd = socket(AF_INET, SOCK_STREAM, 0);
+    to.sin_port = htons(dport);
+    CHECK(connect(fd, (struct sockaddr *) &to, sizeof(to)) == 0);
+    for (uint32_t i = 0; i < 3; i++) {
+        size_t n = b_block_ssrc(buf, key, 50 + i, 9000 + i * 1024, i + 1, 0x17000000);
+        CHECK(write(fd, buf, n) == (ssize_t) n);
+    }
+    b_sleep(50);
+    ap2_buffered_rate(b, true, 9000, true);
+    CHECK(b_wait(1, 1000));
+    CHECK(ap2_buffered_output_started(b));
+    pthread_mutex_lock(&g_bl);
+    CHECK_EQ(g_bstarts, 1);
     CHECK_EQ(g_brate, 48000);
     pthread_mutex_unlock(&g_bl);
     close(fd);

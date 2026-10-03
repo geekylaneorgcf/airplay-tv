@@ -239,6 +239,14 @@ class Settings(context: Context) {
         get() = prefs.getInt(KEY_AIRPLAY2, AIRPLAY2_OFF).coerceIn(AIRPLAY2_OFF, AIRPLAY2_NTP)
         set(value) = prefs.edit().putInt(KEY_AIRPLAY2, value).apply()
 
+    /**
+     * An experiment for the debug build, set with `run-as` and never from a screen: addresses (comma separated) that the AirPlay 2 mode
+     * with the PTP bit names as its clock peer instead of this device, for a host that listens on UDP 319 and 320 where an app cannot.
+     */
+    var airplay2TimingPeer: String
+        get() = prefs.getString(KEY_AIRPLAY2_PEER, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_AIRPLAY2_PEER, value).apply()
+
     /** Wall-clock milliseconds at which an AirPlay 2 trial that no session has confirmed ends; 0 when there is no trial running. */
     var airplay2TrialUntil: Long
         get() = prefs.getLong(KEY_AIRPLAY2_UNTIL, 0L)
@@ -262,6 +270,7 @@ class Settings(context: Context) {
         const val KEY_SPEAKER_UNTIL = "appear_as_speaker_until"
         const val KEY_AIRPLAY2 = "airplay2_mode"
         const val KEY_AIRPLAY2_UNTIL = "airplay2_until"
+        const val KEY_AIRPLAY2_PEER = "airplay2_timing_peer"
         const val AIRPLAY2_OFF = 0
         const val AIRPLAY2_ON = 1
         const val AIRPLAY2_FULL = 2

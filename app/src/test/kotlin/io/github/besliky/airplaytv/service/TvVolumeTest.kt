@@ -22,6 +22,44 @@ class TvVolumeTest {
     }
 
     @Test
+    fun `a slider that began low leaves the TV where it was`() {
+        // a phone that has not played to this receiver before starts its slider a third of the way up
+        val home = TvVolume.home(0.33f)
+        assertEquals(17, TvVolume.target(TvVolume.fraction(0.33f, home, 1f), 17))
+        // turned down to half of where it began: half of the TV's volume
+        assertEquals(8, TvVolume.target(TvVolume.fraction(0.165f, home, 1f), 16))
+        assertEquals(0, TvVolume.target(TvVolume.fraction(0f, home, 1f), 17))
+        // turned up: never above what the TV had
+        assertEquals(17, TvVolume.target(TvVolume.fraction(1f, home, 1f), 17))
+    }
+
+    @Test
+    fun `a slider that began at the top moves the TV as it always did`() {
+        val home = TvVolume.home(1f)
+        assertEquals(1f, home, 0f)
+        assertEquals(15, TvVolume.target(TvVolume.fraction(1f, home, 1f), 15))
+        assertEquals(8, TvVolume.target(TvVolume.fraction(0.5f, home, 1f), 15))
+        assertEquals(5, TvVolume.target(TvVolume.fraction(0.33f, home, 1f), 15))
+    }
+
+    @Test
+    fun `the ceiling of the volume limits holds the TV below its volume, from the start`() {
+        val home = TvVolume.home(0.4f)
+        // a night ceiling of half: the TV begins at half of its volume and the top of the slider is no higher
+        assertEquals(10, TvVolume.target(TvVolume.fraction(0.4f, home, 0.5f), 20))
+        assertEquals(10, TvVolume.target(TvVolume.fraction(1f, home, 0.5f), 20))
+        assertEquals(5, TvVolume.target(TvVolume.fraction(0.2f, home, 0.5f), 20))
+    }
+
+    @Test
+    fun `a slider that began at the bottom is not taken as home`() {
+        assertEquals(0.25f, TvVolume.home(0f), 0f)
+        assertEquals(0.25f, TvVolume.home(0.1f), 0f)
+        assertEquals(0.6f, TvVolume.home(0.6f), 0f)
+        assertEquals(1f, TvVolume.home(7f), 0f)
+    }
+
+    @Test
     fun `a volume the owner set on the TV moves the top of the slider`() {
         // the slider stood at half, the TV was turned up to 12: full would be 24
         assertEquals(24, TvVolume.referenceAfterTvChange(12, 0.5f))

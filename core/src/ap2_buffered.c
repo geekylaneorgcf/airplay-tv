@@ -81,6 +81,9 @@ struct ap2_buffered {
     uint32_t ssrc;
 
     audio_format_t cur;                /* what the audio output is playing as; changes when the blocks do */
+    _Atomic bool out_started;          /* the audio output was started for this stream: with the first block that is due, see prepare_output */
+    uint64_t blocks_out;               /* blocks handed to the audio output */
+    int control_seen;                  /* datagrams on the control port that were shown in the log (the first few) */
 
     uint8_t *rx;                       /* bytes of the TCP stream not yet made into a block */
     size_t rx_len;
@@ -243,6 +246,10 @@ void ap2_buffered_flush(ap2_buffered_t *b, bool have_from, uint32_t from_seq, ui
     wakeup_signal(&b->wake);
 }
 
+bool ap2_buffered_output_started(const ap2_buffered_t *b) {
+    return b && atomic_load(&b->out_started);
+}
+
 bool ap2_buffered_position(ap2_buffered_t *b, uint32_t *rtp) {
     if (!b) {
         return false;
@@ -348,19 +355,24 @@ static void read_stream(ap2_buffered_t *b) {
     }
 }
 
-/* A block says what it is. When that is another format than the audio output plays (the sender went from one song to the next and
- * with it from AAC at 44100 Hz to AAC at 48000 Hz, say), the output is started again for the new one. Only this thread calls it. */
-static void switch_format_for(ap2_buffered_t *b, uint32_t ssrc) {
+/* Makes the audio output ready for a block with the codec id ssrc. The output is started with the first block that is due: a stream
+ * that the sender sets up and takes down again at once (an iPhone does that when a route is chosen and nothing plays) never touches
+ * the audio output, with its sound focus and its volume. It is started again when the blocks are another format than the output
+ * plays (the sender went from one song to the next and with it from AAC at 44100 Hz to AAC at 48000 Hz, say). Only this thread calls it. */
+static void prepare_output(ap2_buffered_t *b, uint32_t ssrc) {
     audio_format_t f;
     if (!ap2_format_for_ssrc(ssrc, &f)) {
+        f = b->cur;
+    }
+    bool started = atomic_load(&b->out_started);
+    if (started && f.ct == b->cur.ct && f.sample_rate == b->cur.sample_rate) {
         return;
     }
-    if (f.ct == b->cur.ct && f.sample_rate == b->cur.sample_rate) {
-        return;
-    }
-    LOG_I(AUDIO, "AirPlay 2 buffered audio: the stream is now %s at %d Hz", f.ct == AUDIO_CT_ALAC ? "ALAC" : "AAC-LC", f.sample_rate);
-    if (b->p.ops->audio_stop) {
-        b->p.ops->audio_stop(b->p.ops_ctx);
+    if (started) {
+        LOG_I(AUDIO, "AirPlay 2 buffered audio: the stream is now %s at %d Hz", f.ct == AUDIO_CT_ALAC ? "ALAC" : "AAC-LC", f.sample_rate);
+        if (b->p.ops->audio_stop) {
+            b->p.ops->audio_stop(b->p.ops_ctx);
+        }
     }
     pthread_mutex_lock(&b->lock);
     b->cur = f;
@@ -369,6 +381,7 @@ static void switch_format_for(ap2_buffered_t *b, uint32_t ssrc) {
     if (b->p.ops->audio_start && !b->p.ops->audio_start(b->p.ops_ctx, &f)) {
         LOG_W(AUDIO, "audio output could not be started");
     }
+    atomic_store(&b->out_started, true);
     if (b->p.ops->audio_volume && b->p.volume_db) {
         b->p.ops->audio_volume(b->p.ops_ctx, *b->p.volume_db);
     }
@@ -421,7 +434,8 @@ static uint64_t deliver_due(ap2_buffered_t *b) {
         b->last_ts = ts;
         b->played = true;
         pthread_mutex_unlock(&b->lock);
-        switch_format_for(b, ssrc);
+        prepare_output(b, ssrc);
+        b->blocks_out++;
         stat_add(&g_stats.audio_packets_in, 1);
         if (b->p.ops->audio_frame) {
             b->p.ops->audio_frame(b->p.ops_ctx, data, len, ts, 0);
@@ -464,7 +478,13 @@ static void *buffered_thread(void *arg) {
             }
             if (pfds[1].revents & POLLIN) {
                 uint8_t junk[512];
-                while (recv(b->control_fd, junk, sizeof(junk), MSG_DONTWAIT) > 0) {
+                ssize_t got;
+                while ((got = recv(b->control_fd, junk, sizeof(junk), MSG_DONTWAIT)) > 0) {
+                    if (b->control_seen < 3) {
+                        b->control_seen++;
+                        LOG_I(AUDIO, "AirPlay 2 buffered audio: %zd bytes on the control port, they start %02x %02x %02x %02x", got, junk[0],
+                              got > 1 ? junk[1] : 0, got > 2 ? junk[2] : 0, got > 3 ? junk[3] : 0);
+                    }
                 }
             }
             if (listen_idx >= 0 && (pfds[listen_idx].revents & POLLIN)) {
@@ -477,6 +497,7 @@ static void *buffered_thread(void *arg) {
                         b->conn_fd = fd;
                         LOG_I(AUDIO, "AirPlay 2 buffered audio connection opened");
                     } else {
+                        LOG_W(AUDIO, "AirPlay 2 buffered audio: a connection from another host is turned away");
                         close(fd);
                     }
                 }
@@ -538,6 +559,8 @@ void ap2_buffered_stop(ap2_buffered_t *b) {
         wakeup_signal(&b->wake);
         pthread_join(b->thread, NULL);
     }
+    LOG_I(AUDIO, "AirPlay 2 buffered audio stream closed: %llu blocks received, %llu played, the audio output %s",
+          (unsigned long long) b->blocks_in, (unsigned long long) b->blocks_out, atomic_load(&b->out_started) ? "was used" : "was not touched");
     net_close(&b->conn_fd);
     net_close(&b->listen_fd);
     net_close(&b->control_fd);

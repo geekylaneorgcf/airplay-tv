@@ -45,6 +45,10 @@ void ap2_buffered_rate(ap2_buffered_t *b, bool play, uint32_t anchor_rtp, bool h
  * later. With one, blocks from from_seq up to (not including) until_seq go. Sequence numbers are 23 bits. */
 void ap2_buffered_flush(ap2_buffered_t *b, bool have_from, uint32_t from_seq, uint32_t until_seq);
 
+/* True once the audio output was started for this stream. It starts with the first block that is due, not with the stream's setup: a
+ * route that the sender sets up and takes down again at once leaves the audio output alone. */
+bool ap2_buffered_output_started(const ap2_buffered_t *b);
+
 /* The RTP time of the block being played, 0 and false when nothing has played yet. */
 bool ap2_buffered_position(ap2_buffered_t *b, uint32_t *rtp);
 

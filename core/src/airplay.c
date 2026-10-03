@@ -435,11 +435,13 @@ static void session_stop_video(session_t *session) {
 static void session_stop_audio(session_t *session) {
     airplay_server_t *s = session->server;
     if (session->audio || session->buffered) {
+        /* a buffered stream that never played (an idle route is set up and taken down at once) never started the audio output either */
+        bool output = session->audio != NULL || ap2_buffered_output_started(session->buffered);
         audio_stop(session->audio);
         ap2_buffered_stop(session->buffered);
         session->audio = NULL;
         session->buffered = NULL;
-        if (s->media->audio_stop) {
+        if (output && s->media->audio_stop) {
             s->media->audio_stop(s->media_ctx);
         }
     }
@@ -1638,6 +1640,42 @@ static void dmap_scan(const uint8_t *data, size_t len, int depth, dmap_track_t *
     }
 }
 
+/* The tags of a DMAP body with their sizes, one level down into the items ("mlit"), for the log: which fields a sender sends, never
+ * their text. */
+static void dmap_outline(const uint8_t *data, size_t len, int depth, char *out, size_t cap) {
+    size_t pos = 0;
+    while (len - pos >= 8) {
+        size_t n = strlen(out);
+        if (n + 16 >= cap) {
+            return;
+        }
+        const uint8_t *tag = data + pos;
+        size_t item = dmap_be32(data + pos + 4);
+        pos += 8;
+        if (item > len - pos) {
+            return;
+        }
+        bool print = true;
+        for (int i = 0; i < 4; i++) {
+            print = print && tag[i] >= 32 && tag[i] < 127;
+        }
+        if (!print) {
+            return;
+        }
+        snprintf(out + n, cap - n, "%s%.4s %zu", n ? ", " : "", (const char *) tag, item);
+        if (depth < 1 && memcmp(tag, "mlit", 4) == 0) {
+            n = strlen(out);
+            snprintf(out + n, cap - n, " {");
+            dmap_outline(data + pos, item, depth + 1, out, cap);
+            n = strlen(out);
+            if (n + 2 < cap) {
+                snprintf(out + n, cap - n, "}");
+            }
+        }
+        pos += item;
+    }
+}
+
 static void handle_set_parameter(airplay_server_t *s, conn_t *c, const rtsp_request_t *req, rtsp_reply_t *reply) {
     const char *ct = rtsp_header(req, "Content-Type");
     if (!ct) {
@@ -1650,11 +1688,16 @@ static void handle_set_parameter(airplay_server_t *s, conn_t *c, const rtsp_requ
                 dmap_track_t track;
                 memset(&track, 0, sizeof(track));
                 dmap_scan(req->body, req->body_len, 0, &track);
+                char outline[200] = "";
+                dmap_outline(req->body, req->body_len, 0, outline, sizeof(outline));
+                LOG_I(AIRPLAY, "track info: title %zu, artist %zu, album %zu bytes; fields %s", strlen(track.title), strlen(track.artist),
+                      strlen(track.album), outline);
                 s->ev.track_info(s->ev.ctx, track.title, track.artist, track.album);
             }
             return;
         }
         if (strncmp(ct, "image/", 6) == 0) {
+            LOG_I(AIRPLAY, "artwork: %s, %zu bytes", ct, req->body_len);
             if (s->ev.artwork) {
                 s->ev.artwork(s->ev.ctx, req->body, req->body_len);
             }
@@ -1678,7 +1721,7 @@ static void handle_set_parameter(airplay_server_t *s, conn_t *c, const rtsp_requ
                 db = 0.0f;
             }
             s->volume_db = db;
-            if (c->session && c->session->audio && s->media->audio_volume) {
+            if (c->session && (c->session->audio || ap2_buffered_output_started(c->session->buffered)) && s->media->audio_volume) {
                 s->media->audio_volume(s->media_ctx, db);
             }
             LOG_D(AUDIO, "volume %.1f dB", (double) db);
@@ -2204,20 +2247,12 @@ static bp_node_t *setup_buffered_stream(airplay_server_t *s, session_t *session,
     p.format = f;
     p.volume_db = &s->volume_db;
 
-    if (s->media->audio_start && !s->media->audio_start(s->media_ctx, &f)) {
-        LOG_W(AUDIO, "audio output could not be started");
-    }
-    if (s->media->audio_volume) {
-        s->media->audio_volume(s->media_ctx, s->volume_db);
-    }
+    /* the audio output is started with the first block that is due, see ap2_buffered.h */
     uint16_t dport = 0;
     uint16_t cport = 0;
     session->buffered = ap2_buffered_start(&p, AP2_BUFFERED_BYTES, &dport, &cport);
     secure_zero(p.key, sizeof(p.key));
     if (!session->buffered) {
-        if (s->media->audio_stop) {
-            s->media->audio_stop(s->media_ctx);
-        }
         return NULL;
     }
     atomic_store_explicit(&g_stats.audio_ct, f.ct, memory_order_relaxed);
@@ -2310,7 +2345,24 @@ static void ap2_handle_setup(airplay_server_t *s, conn_t *c, const rtsp_request_
             ap2_local_ip(c, ip, sizeof(ip));
             bp_node_t *peer = bp_new_dict();
             bp_node_t *addresses = bp_new_array();
-            ap2_add_local_addresses(addresses, ip);
+            /* An experiment, not a feature: AIRPLAYTV_TIMING_PEER (a comma separated list of addresses, set by the debug build) names
+             * other hosts as the clock peer, for a host that listens on UDP 319 and 320 where this device cannot. */
+            const char *other = getenv("AIRPLAYTV_TIMING_PEER");
+            if (other && other[0]) {
+                char list[160];
+                snprintf(list, sizeof(list), "%s", other);
+                char *save = NULL;
+                int count = 0;
+                for (char *item = strtok_r(list, ",", &save); item && count < 8; item = strtok_r(NULL, ",", &save), count++) {
+                    if (count == 0) {
+                        snprintf(ip, sizeof(ip), "%s", item);
+                    }
+                    bp_array_append(addresses, bp_new_string(item));
+                }
+                LOG_I(AIRPLAY, "AirPlay 2 SETUP: the clock peer is %d other address(es), the first is %s", count, ip);
+            } else {
+                ap2_add_local_addresses(addresses, ip);
+            }
             bp_dict_set(peer, "Addresses", addresses);
             bp_dict_set(peer, "ID", bp_new_string(ip));
             bp_dict_set(out, "timingPeerInfo", peer);
