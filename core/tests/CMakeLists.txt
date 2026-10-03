@@ -9,6 +9,7 @@ target_compile_options(test_support PRIVATE ${COMMON_FLAGS})
 # One runner with every unit and loopback test. Test files register themselves,
 # so they are linked as object files rather than through a static library.
 add_executable(airplaytv_tests
+    test_ap2.c
     test_crypto.c
     test_loopback.c
     test_media.c

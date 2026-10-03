@@ -85,6 +85,7 @@ add_library(airplay_core STATIC
     src/pairing.c
     src/rtsp.c
     src/srp.c
+    src/ap2_pair.c
     src/stats.c
     src/util.c)
 target_include_directories(airplay_core PUBLIC src)
