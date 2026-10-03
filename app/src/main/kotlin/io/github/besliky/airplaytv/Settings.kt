@@ -229,6 +229,20 @@ class Settings(context: Context) {
         get() = prefs.getLong(KEY_SPEAKER_UNTIL, 0L)
         set(value) = prefs.edit().putLong(KEY_SPEAKER_UNTIL, value).apply()
 
+    /**
+     * AirPlay 2 for music (see docs/AIRPLAY2.md): [AIRPLAY2_OFF], [AIRPLAY2_ON], or [AIRPLAY2_FULL] (the same, with the timing and
+     * buffered-audio feature bits set, to see what a phone does with them). Not for mirroring, photos or video, which stay AirPlay 1.
+     * Switched on as a trial: [airplay2TrialUntil] is when it switches itself off again if no phone has started a session by then.
+     */
+    var airplay2: Int
+        get() = prefs.getInt(KEY_AIRPLAY2, AIRPLAY2_OFF).coerceIn(AIRPLAY2_OFF, AIRPLAY2_FULL)
+        set(value) = prefs.edit().putInt(KEY_AIRPLAY2, value).apply()
+
+    /** Wall-clock milliseconds at which an AirPlay 2 trial that no session has confirmed ends; 0 when there is no trial running. */
+    var airplay2TrialUntil: Long
+        get() = prefs.getLong(KEY_AIRPLAY2_UNTIL, 0L)
+        set(value) = prefs.edit().putLong(KEY_AIRPLAY2_UNTIL, value).apply()
+
     fun registerListener(l: SharedPreferences.OnSharedPreferenceChangeListener) =
         prefs.registerOnSharedPreferenceChangeListener(l)
 
@@ -245,6 +259,11 @@ class Settings(context: Context) {
         const val KEY_LYRICS_OFFSET = "lyrics_offset_ms"
         const val KEY_SPEAKER = "appear_as_speaker"
         const val KEY_SPEAKER_UNTIL = "appear_as_speaker_until"
+        const val KEY_AIRPLAY2 = "airplay2_mode"
+        const val KEY_AIRPLAY2_UNTIL = "airplay2_until"
+        const val AIRPLAY2_OFF = 0
+        const val AIRPLAY2_ON = 1
+        const val AIRPLAY2_FULL = 2
         const val KEY_SLEEP = "sleep_after_minutes"
         const val KEY_RETURN = "return_to_player"
         const val KEY_TV_MENU = "tv_menu_button"
@@ -297,7 +316,7 @@ class Settings(context: Context) {
         const val KEY_DECODER = "preferred_decoder"
 
         /** Settings that require the receiver to be restarted when they change. */
-        val RESTART_KEYS = setOf(KEY_NAME, KEY_PIN, KEY_RESOLUTION, KEY_FPS, KEY_DECODER, KEY_SPEAKER, KEY_VIDEO)
+        val RESTART_KEYS = setOf(KEY_NAME, KEY_PIN, KEY_RESOLUTION, KEY_FPS, KEY_DECODER, KEY_SPEAKER, KEY_VIDEO, KEY_AIRPLAY2)
 
         /**
          * Normalises a device name: trims, drops control characters and limits the

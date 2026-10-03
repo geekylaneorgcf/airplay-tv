@@ -463,7 +463,7 @@ static bool copy_bytes(JNIEnv *env, jbyteArray arr, uint8_t *out, size_t len) {
 
 static jint JNICALL n_start(JNIEnv *env, jclass cls, jbyteArray name, jbyteArray device_id, jstring public_id,
                             jbyteArray seed, jboolean require_pin, jint port, jint width, jint height, jint fps,
-                            jboolean hevc, jstring model, jstring srcvers, jboolean video) {
+                            jboolean hevc, jstring model, jstring srcvers, jboolean video, jint airplay2) {
     (void) cls;
     airplay_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
@@ -508,6 +508,7 @@ static jint JNICALL n_start(JNIEnv *env, jclass cls, jbyteArray name, jbyteArray
     cfg.display_fps = fps;
     cfg.hevc = hevc;
     cfg.video = video;
+    cfg.airplay2 = airplay2 > 0 ? (airplay2 > 2 ? 2 : airplay2) : 0;
 
     airplay_events_t ev = {
         .ctx = NULL,
@@ -757,7 +758,7 @@ static void JNICALL n_set_takeover(JNIEnv *env, jclass cls, jint policy) {
 static const JNINativeMethod kMethods[] = {
     { "nativeSetLogLevel", "(I)V", (void *) n_set_log_level },
     { "nativeLog", "(IILjava/lang/String;)V", (void *) n_log },
-    { "nativeStart", "([B[BLjava/lang/String;[BZIIIIZLjava/lang/String;Ljava/lang/String;Z)I", (void *) n_start },
+    { "nativeStart", "([B[BLjava/lang/String;[BZIIIIZLjava/lang/String;Ljava/lang/String;ZI)I", (void *) n_start },
     { "nativeStop", "()V", (void *) n_stop },
     { "nativePublicKey", "()Ljava/lang/String;", (void *) n_public_key },
     { "nativeTxtRecords", "(Z)[Ljava/lang/String;", (void *) n_txt_records },

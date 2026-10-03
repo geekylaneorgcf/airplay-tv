@@ -475,7 +475,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
             settings.deviceName.toByteArray(Charsets.UTF_8), id.deviceId, id.publicId, seed,
             settings.requirePin, DEFAULT_PORT, mode.width, mode.height, settings.frameRate, mode.hevc,
             "", "", // the receiver's own identity, an Apple TV: a different model string stops iOS from starting sessions
-            settings.airplayVideo,
+            settings.airplayVideo, settings.airplay2,
         )
         seed.fill(0)
         if (port <= 0) {
@@ -491,6 +491,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
         publish()
         updateIdleState()
         checkSpeakerTrial()
+        checkAirplay2Trial()
         handler.removeCallbacks(healthTick)
         handler.postDelayed(healthTick, HEALTH_MS)
     }
@@ -559,6 +560,26 @@ class ReceiverService : Service(), NativeBridge.Listener {
         }
     }
 
+    /**
+     * An AirPlay 2 trial that no phone has started a session in by its deadline is undone, so a receiver that iOS does not use in
+     * this mode never stays that way: the owner would only see that nothing plays. A session that starts confirms it.
+     */
+    private val airplay2TrialExpiry = Runnable { checkAirplay2Trial() }
+
+    private fun checkAirplay2Trial() {
+        handler.removeCallbacks(airplay2TrialExpiry)
+        val until = settings.airplay2TrialUntil
+        if (settings.airplay2 == Settings.AIRPLAY2_OFF || until <= 0L) return
+        val left = until - System.currentTimeMillis()
+        if (left <= 0L) {
+            Log.i(SESSION, "no phone started a session in the AirPlay 2 trial: back to AirPlay")
+            settings.airplay2TrialUntil = 0L
+            settings.airplay2 = Settings.AIRPLAY2_OFF
+        } else {
+            handler.postDelayed(airplay2TrialExpiry, left + 500L)
+        }
+    }
+
     private fun stopReceiver() {
         handler.removeCallbacks(healthTick)
         if (!running) return
@@ -612,7 +633,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
             return
         }
         val name = settings.deviceName
-        val (airplayTxt, raopTxt) = Appearance.records(txt(raop = false), txt(raop = true), settings.speakerMode)
+        val (airplayTxt, raopTxt) = Appearance.records(txt(raop = false), txt(raop = true), settings.speakerMode && settings.airplay2 == Settings.AIRPLAY2_OFF)
         advertiser.publish(
             Advertiser.Registration(
                 airplayName = name,
@@ -830,6 +851,11 @@ class ReceiverService : Service(), NativeBridge.Listener {
             Log.i(SESSION, "music started while appearing as a speaker: the trial is over, it stays")
             settings.speakerTrialUntil = 0L
             handler.removeCallbacks(speakerTrialExpiry)
+        }
+        if (settings.airplay2 != Settings.AIRPLAY2_OFF && settings.airplay2TrialUntil > 0L) {
+            Log.i(SESSION, "a phone started a session in the AirPlay 2 trial: the trial is over, it stays")
+            settings.airplay2TrialUntil = 0L
+            handler.removeCallbacks(airplay2TrialExpiry)
         }
         // Audio-only senders (music apps) never open the playback screen, so wake the display
         // here too; on a TV with HDMI-CEC this switches the TV on so the audio is heard.

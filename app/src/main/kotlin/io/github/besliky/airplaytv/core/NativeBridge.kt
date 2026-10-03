@@ -214,6 +214,7 @@ object NativeBridge {
         model: String,
         sourceVersion: String,
         video: Boolean,
+        airplay2: Int,
     ): Int
 
     @JvmStatic
