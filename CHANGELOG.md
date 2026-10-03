@@ -3,6 +3,7 @@
 ## [0.2.1] - fork
 
 - **rc.16.**
+  - **No bars along the bottom of Now Playing.** The visualizer is off unless it is switched on in Settings, Visualizer.
   - **The TV's volume cannot stay low after a session that ended badly.** The receiver remembers the volume it set on the TV; when a
     session ends without giving the volume back (the app was killed, the link dropped), the next session finds the TV still at that
     volume and puts it back to what it was before, instead of taking the low value as the new starting point.

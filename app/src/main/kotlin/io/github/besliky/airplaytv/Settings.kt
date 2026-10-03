@@ -203,9 +203,9 @@ class Settings(context: Context) {
         get() = prefs.getBoolean(KEY_NIGHT_MODE, false)
         set(value) = prefs.edit().putBoolean(KEY_NIGHT_MODE, value).apply()
 
-    /** A calm visualizer on the Now Playing screen. */
+    /** A visualizer on the Now Playing screen; off unless switched on (the key is new, so an old "on" from before it was turned off by default does not count). */
     var visualizer: Boolean
-        get() = prefs.getBoolean(KEY_VISUALIZER, true)
+        get() = prefs.getBoolean(KEY_VISUALIZER, false)
         set(value) = prefs.edit().putBoolean(KEY_VISUALIZER, value).apply()
 
     /**
@@ -309,7 +309,7 @@ class Settings(context: Context) {
         const val KEY_TREBLE = "treble"
         const val KEY_LOUDNESS = "loudness"
         const val KEY_NIGHT_MODE = "night_mode"
-        const val KEY_VISUALIZER = "visualizer"
+        const val KEY_VISUALIZER = "visualizer_bars"
         const val KEY_SEEN_VERSION = "seen_version"
         const val KEY_VIDEO = "airplay_video"
 
