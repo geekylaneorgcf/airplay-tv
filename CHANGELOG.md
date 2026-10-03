@@ -2,7 +2,7 @@
 
 ## [0.2.1] - fork
 
-- **rc.14 (not released yet).**
+- **rc.14.**
   - **Another app on the TV takes the sound.** The output asks for audio focus and listens: when the YouTube app (or any player that asks
     for the sound) starts, the receiver goes silent at once and asks the phone to pause (DACP `pause`, the toggle only for a sender that does
     not know it); when the phone plays again, the sound comes back. A moment of silence for a voice prompt only mutes, a prompt speaking over
@@ -13,8 +13,10 @@
   - **AirPlay 2 for music** (debug builds, Advanced, AirPlay 2 (Music); off by default, a trial that switches itself off): transient
     pairing and the sealed control channel, the event connection, realtime audio and **buffered audio** (the stream an iPhone asks for:
     TCP blocks sealed with ChaCha20-Poly1305, paced by the receiver because there is no PTP clock to follow), ALAC and AAC-LC at 44100 and
-    48000 Hz (the audio output now plays either rate). Tried with a test sender and on the stick; with an iPhone it pairs and sets up its
-    stream, the audio is being tried. See firetv-4kmax `docs/AIRPLAY2.md`.
+    48000 Hz (the audio output now plays either rate). Tried with a test sender and on the stick; an iPhone pairs, sets up its stream and
+    takes it down again at once (it expects its clock packets, PTP on UDP 319 and 320, to be answered, which an app cannot do without
+    root), so there is no sound from a phone yet; the receiver now answers like shairport-sync does (an updateInfo message on the event
+    connection, the clock peer addresses, a no-PTP mode to try) and that is being worked on. See firetv-4kmax `docs/AIRPLAY2.md`.
 - **rc.13.** The log shows what a sender asks of the receiver (the first 80 requests of each connection: method, address, a few harmless
   headers, the text of a parameter request and the shape of a property-list body; never a pairing or FairPlay body, a name or an
   address), and a request the receiver does not know is a warning instead of silence. It is how the question whether the phone's
