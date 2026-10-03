@@ -265,6 +265,7 @@ int airplay_txt_airplay(const airplay_server_t *s, txt_entry_t *out, int max) {
         n = txt_add(out, max, n, "srcvers", s->cfg.srcvers);
         n = txt_add(out, max, n, "osvers", "16.0");
         n = txt_add(out, max, n, "vv", "2");
+        n = txt_add(out, max, n, "fv", "p20.78000012.3");
         return n;
     }
     n = txt_add(out, max, n, "deviceid", s->device_id_str);
@@ -1433,11 +1434,15 @@ static bp_node_t *setup_audio_stream(airplay_server_t *s, session_t *session, bp
     bp_get_uint(bp_dict_get(stream, "controlPort"), &control_port);
     bp_get_bool(bp_dict_get(stream, "usingScreen"), &using_screen);
     bp_get_bool(bp_dict_get(stream, "isMedia"), &is_media);
-    if (aead_key && ct == 0) {
-        /* AirPlay 2 names the format with a code (bit 18 is ALAC 44100/16/2, the one realtime stream) */
-        uint64_t format = 0;
-        bp_get_uint(bp_dict_get(stream, "audioFormat"), &format);
-        if (format & 0x40000) {
+    if (aead_key) {
+        /* The realtime stream of AirPlay 2 is ALAC (shairport-sync takes it as that whatever the sender calls it), 44100 Hz, 16 bit,
+         * stereo: that is the one format this receiver's audio output has. */
+        uint64_t sr = 0;
+        bp_get_uint(bp_dict_get(stream, "sr"), &sr);
+        if (sr != 0 && sr != 44100) {
+            LOG_W(AUDIO, "AirPlay 2 audio at %llu Hz: the output plays 44100 Hz, it will sound wrong", (unsigned long long) sr);
+        }
+        if (ct != AUDIO_CT_ALAC && ct != AUDIO_CT_AAC_LC && ct != AUDIO_CT_AAC_ELD) {
             ct = AUDIO_CT_ALAC;
         }
     }
