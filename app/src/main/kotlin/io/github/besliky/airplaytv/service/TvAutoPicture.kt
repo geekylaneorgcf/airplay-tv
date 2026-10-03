@@ -92,8 +92,8 @@ object TvAutoPicture {
     }
 
     private fun setMode(tv: TvControl, settings: Settings) {
-        val wanted = settings.tvAutoPictureMode
         val now = tv.readPicture() ?: return
+        val wanted = TvPicture.translate(settings.tvAutoPictureMode, now)
         if (now.equals(wanted, ignoreCase = true)) return
         val ok = tv.setPicture(wanted)
         Log.i(SERVICE, "TV auto picture: $wanted on the chosen input: ${if (ok) "done" else "the TV did not take it"}")

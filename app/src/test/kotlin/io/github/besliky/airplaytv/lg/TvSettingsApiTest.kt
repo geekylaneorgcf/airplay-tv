@@ -22,6 +22,42 @@ class TvSettingsApiTest {
     }
 
     @Test
+    fun `the modes of the HDR families are told from the plain ones`() {
+        assertEquals(TvPicture.Family.SDR, TvPicture.familyOf("cinema"))
+        assertEquals(TvPicture.Family.SDR, TvPicture.familyOf("hdrEffect"))
+        assertEquals(TvPicture.Family.SDR, TvPicture.familyOf(null))
+        assertEquals(TvPicture.Family.HDR, TvPicture.familyOf("hdrCinema"))
+        assertEquals(TvPicture.Family.DOLBY, TvPicture.familyOf("dolbyHdrGame"))
+    }
+
+    @Test
+    fun `the mode the owner's TV reports is named for people`() {
+        assertEquals("Dolby Vision Game", TvPicture.label("dolbyHdrGame"))
+        assertEquals("HDR Cinema", TvPicture.label("hdrCinema"))
+        assertEquals("Dolby Vision Bright", TvPicture.label("dolbyHdrBright"))
+        assertEquals("Filmmaker", TvPicture.label("filmMaker"))
+        assertEquals("dolbyHdrSomethingNew", TvPicture.label("dolbyHdrSomethingNew"))
+    }
+
+    @Test
+    fun `a scene's plain mode is turned into the mode of the signal the TV shows`() {
+        assertEquals("cinema", TvPicture.translate("cinema", "standard"))
+        assertEquals("dolbyHdrGame", TvPicture.translate("game", "dolbyHdrCinema"))
+        assertEquals("dolbyHdrBright", TvPicture.translate("standard", "dolbyHdrGame"))
+        assertEquals("hdrFilmMaker", TvPicture.translate("filmMaker", "hdrGame"))
+        assertEquals("hdrCinema", TvPicture.translate("hdrCinema", "hdrGame"))
+        assertEquals("cinema", TvPicture.translate("hdrCinema", "standard"))
+        assertEquals("game", TvPicture.translate("dolbyHdrGame", null))
+    }
+
+    @Test
+    fun `the panel cycles through the modes of the family the TV is in`() {
+        assertEquals(listOf("dolbyHdrCinema", "dolbyHdrBright", "dolbyHdrDark", "dolbyHdrVivid", "dolbyHdrGame"), TvPicture.modesFor(TvPicture.Family.DOLBY))
+        assertEquals("standard", TvPicture.modesFor(TvPicture.Family.SDR).first())
+        assertEquals("hdrStandard", TvPicture.modesFor(TvPicture.Family.HDR).first())
+    }
+
+    @Test
     fun `the picture write asks for the picture category`() {
         val request = TvPicture.writeRequest("game")
         assertEquals("picture", request.getString("category"))

@@ -26,8 +26,12 @@ class TvControl(private val session: LgSession) : Closeable {
         /** The input in front as `HDMI_2`, or null when the TV shows something else (its own apps, a channel). */
         val inputId: String? get() = LgFacts.inputIdOf(appId)
 
-        /** The connected inputs, as the panel offers them. */
-        val connectedInputs: List<LgFacts.Input> get() = inputs.filter { it.connected }
+        /**
+         * The inputs the panel offers: those with something connected, and those the owner has named (a PlayStation that is switched off
+         * is still where "Game" goes), not the empty ones that still have their factory names.
+         */
+        val offeredInputs: List<LgFacts.Input>
+            get() = inputs.filter { it.connected || !DEFAULT_NAME.matches(it.label.trim()) }
     }
 
     val closed: Boolean get() = session.closed
@@ -123,6 +127,8 @@ class TvControl(private val session: LgSession) : Closeable {
     override fun close() = session.close()
 
     companion object {
+        private val DEFAULT_NAME = Regex("""HDMI\s*\d""", RegexOption.IGNORE_CASE)
+
         private const val READ_MS = 3_000L
         private const val WRITE_MS = 5_000L
         private const val SETTLE_MS = 450L

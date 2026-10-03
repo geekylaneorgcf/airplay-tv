@@ -7,6 +7,7 @@ import io.github.besliky.airplaytv.Log.Category.SERVICE
 import io.github.besliky.airplaytv.Settings
 import io.github.besliky.airplaytv.core.NativeBridge
 import io.github.besliky.airplaytv.lg.TvControl
+import io.github.besliky.airplaytv.lg.TvPicture
 import io.github.besliky.airplaytv.lg.TvScenes
 
 /**
@@ -39,7 +40,8 @@ object TvActions {
                 val failed = ArrayList<String>()
                 TvScenes.cappedVolume(state.volume?.level, scene.volume)?.let { if (!tv.setVolume(it)) failed.add("volume") }
                 if (scene.sound.isNotEmpty() && !scene.sound.equals(state.sound, ignoreCase = true) && !tv.setSound(scene.sound)) failed.add("sound output")
-                if (scene.picture.isNotEmpty() && !scene.picture.equals(state.picture, ignoreCase = true) && !tv.setPicture(scene.picture)) failed.add("picture mode")
+                val picture = if (scene.picture.isEmpty()) "" else TvPicture.translate(scene.picture, state.picture)
+                if (picture.isNotEmpty() && !picture.equals(state.picture, ignoreCase = true) && !tv.setPicture(picture)) failed.add("picture mode")
                 if (scene.screenOff) {
                     if (tv.screenOff()) screenOffByUs = true else failed.add("screen")
                 }

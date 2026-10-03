@@ -168,7 +168,7 @@ class TvPanel(private val service: AccessibilityService) {
         if (view == null) return
         state = read
         loading = false
-        inputChoices = read.connectedInputs.mapNotNull { input ->
+        inputChoices = read.offeredInputs.mapNotNull { input ->
             val id = LgFacts.inputIdOf(input.appId) ?: return@mapNotNull null
             id to inputName(id, input.label)
         }
@@ -281,7 +281,8 @@ class TvPanel(private val service: AccessibilityService) {
         }
     }
 
-    private fun pictureChoices(): List<String> = TvPicture.MODES.map { it.id }.let { list -> pictureId?.takeIf { it !in list }?.let { list + it } ?: list }
+    private fun pictureChoices(): List<String> =
+        TvPicture.modesFor(TvPicture.familyOf(pictureId)).let { list -> pictureId?.takeIf { it !in list }?.let { list + it } ?: list }
 
     private fun soundChoices(): List<String> = TvSound.OUTPUTS.map { it.id }.let { list -> soundId?.takeIf { it !in list }?.let { list + it } ?: list }
 

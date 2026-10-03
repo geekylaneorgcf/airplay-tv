@@ -23,8 +23,67 @@ object TvPicture {
         Mode("expert2", "Expert (Dark Room)"),
     )
 
-    fun label(id: String?): String =
-        if (id.isNullOrEmpty()) "Unknown" else MODES.firstOrNull { it.id.equals(id, ignoreCase = true) }?.label ?: id
+    /**
+     * The TV has one set of picture modes for each kind of signal: plain ones (`cinema`) for ordinary video, `hdrCinema` and the like for
+     * HDR10, `dolbyHdrCinema` and the like for Dolby Vision. A TV playing Dolby Vision (the owner's, with the stick on it) reports
+     * `dolbyHdrGame`, and a mode of another family would not be taken.
+     */
+    enum class Family(val prefix: String) { SDR(""), HDR("hdr"), DOLBY("dolbyHdr") }
+
+    fun familyOf(id: String?): Family = when {
+        id == null -> Family.SDR
+        id.startsWith("dolbyHdr") -> Family.DOLBY
+        id != "hdrEffect" && id.length > 3 && id.startsWith("hdr") && id[3].isUpperCase() -> Family.HDR
+        else -> Family.SDR
+    }
+
+    private fun lowerFirst(text: String) = if (text.isEmpty()) text else text[0].lowercaseChar() + text.substring(1)
+
+    private fun upperFirst(text: String) = if (text.isEmpty()) text else text[0].uppercaseChar() + text.substring(1)
+
+    /** The mode without its family's prefix: `dolbyHdrGame` is `game`. */
+    fun baseOf(id: String): String = lowerFirst(id.removePrefix(familyOf(id).prefix))
+
+    private val DOLBY_MODES = listOf("cinema", "bright", "dark", "vivid", "game")
+    private val HDR_MODES = listOf("standard", "cinema", "game", "vivid", "filmMaker")
+
+    /** What a mode that has no counterpart in the other families stands for there (Dolby Vision has no Standard, no Sports, no Expert). */
+    private val DOLBY_SUBSTITUTE = mapOf("standard" to "bright", "filmMaker" to "cinema", "sports" to "vivid", "expert1" to "bright", "expert2" to "dark")
+    private val HDR_SUBSTITUTE = mapOf("sports" to "vivid", "expert1" to "cinema", "expert2" to "cinema", "bright" to "vivid", "dark" to "cinema")
+
+    /** The mode [id] (named as the plain ones are: `cinema`) in the family of the mode the TV is in now [current]; one already of that family stays. */
+    fun translate(id: String, current: String?): String {
+        val family = familyOf(current)
+        if (familyOf(id) == family) return id
+        val base = baseOf(id)
+        return when (family) {
+            Family.SDR -> base
+            Family.HDR -> "hdr" + upperFirst(HDR_SUBSTITUTE[base] ?: base)
+            Family.DOLBY -> "dolbyHdr" + upperFirst(DOLBY_SUBSTITUTE[base] ?: base)
+        }
+    }
+
+    /** The modes the panel cycles through while the TV is in [family]. */
+    fun modesFor(family: Family): List<String> = when (family) {
+        Family.SDR -> MODES.map { it.id }
+        Family.HDR -> HDR_MODES.map { "hdr" + upperFirst(it) }
+        Family.DOLBY -> DOLBY_MODES.map { "dolbyHdr" + upperFirst(it) }
+    }
+
+    fun label(id: String?): String {
+        if (id.isNullOrEmpty()) return "Unknown"
+        val base = baseOf(id)
+        val name = MODES.firstOrNull { it.id == base }?.label ?: when (base) {
+            "bright" -> "Bright"
+            "dark" -> "Dark"
+            else -> return id
+        }
+        return when (familyOf(id)) {
+            Family.SDR -> name
+            Family.HDR -> "HDR $name"
+            Family.DOLBY -> "Dolby Vision $name"
+        }
+    }
 
     /** The picture mode in an answer of `ssap://settings/getSystemSettings`, or null. */
     fun read(message: JSONObject): String? =

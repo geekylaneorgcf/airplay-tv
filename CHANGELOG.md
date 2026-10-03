@@ -21,6 +21,9 @@
     TV Features, TV Notices switches them off.
   - **Auto Picture Mode** (off unless chosen): when the TV goes to the chosen input (PlayStation by name, or an HDMI number) its picture
     mode is set to the chosen one. The TV keeps one picture mode per input, so nothing is put back on leaving.
+  - The picture modes follow the signal: a TV showing Dolby Vision (`dolbyHdrGame`) or HDR10 keeps a separate set of modes, so the
+    panel cycles through the set the TV is in, and a scene's "Cinema" becomes Dolby Vision Cinema there. The inputs the panel offers are
+    those with something connected and those you have named (a switched-off PS5 is still where Game goes).
   - Picture mode is changed through the TV's settings service when the direct request is refused (newer webOS), and every change is read
     back, so a TV that ignores it is reported, not assumed.
 - **rc.17.**
