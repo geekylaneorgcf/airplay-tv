@@ -2,6 +2,16 @@
 
 ## [0.2.1] - fork
 
+- **rc.15.**
+  - **The TV keeps its volume when the phone's slider begins low.** The TV's own volume followed the slider between zero and what the TV
+    had when the phone connected, so a phone whose slider began a third of the way up (a phone that has not played to this receiver
+    before does that) turned a TV that was at 15 down to 5 before a note had played, and nothing could be heard. Now the TV stays where
+    it is for as long as the slider stands where it began; the slider turns it down from there and back up to it, never above what the
+    TV had, and a night ceiling still holds it lower.
+  - **AirPlay 2 for music** (debug builds only): an iPhone that chooses the route and plays nothing sets a stream up and takes it down
+    again at once; that no longer starts the audio output (sound focus, the playing screen, the TV's volume): the output starts with the
+    first block that is due. The phone's volume reaches a running buffered stream (it was dropped). The features say that artwork is
+    wanted. The log names the fields of the track information and the artwork that arrive, and counts the blocks of each stream.
 - **rc.14.**
   - **Another app on the TV takes the sound.** The output asks for audio focus and listens: when the YouTube app (or any player that asks
     for the sound) starts, the receiver goes silent at once and asks the phone to pause (DACP `pause`, the toggle only for a sender that does

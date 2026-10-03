@@ -565,10 +565,6 @@ class ReceiverService : Service(), NativeBridge.Listener {
         }
     }
 
-    /**
-     * An AirPlay 2 trial that no phone has started a session in by its deadline is undone, so a receiver that iOS does not use in
-     * this mode never stays that way: the owner would only see that nothing plays. A session that starts confirms it.
-     */
     /** The debug build's experiment with the clock peer of the AirPlay 2 mode that has the PTP bit (see [Settings.airplay2TimingPeer]); the core reads it from the environment. */
     private fun applyTimingPeerExperiment() {
         try {
@@ -584,6 +580,10 @@ class ReceiverService : Service(), NativeBridge.Listener {
         }
     }
 
+    /**
+     * An AirPlay 2 trial that no phone has started a session in by its deadline is undone, so a receiver that iOS does not use in
+     * this mode never stays that way: the owner would only see that nothing plays. A session that starts confirms it.
+     */
     private val airplay2TrialExpiry = Runnable { checkAirplay2Trial() }
 
     private fun checkAirplay2Trial() {
