@@ -44,6 +44,7 @@ import io.github.besliky.airplaytv.ui.PhotoActivity
 import io.github.besliky.airplaytv.ui.TakeoverActivity
 import io.github.besliky.airplaytv.ui.VideoPlayerActivity
 import java.util.Calendar
+import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.zip.CRC32
 
@@ -238,9 +239,43 @@ class ReceiverService : Service(), NativeBridge.Listener {
         return ReceiverState.current.volume.let { if (it < 0f) 1f else it }
     }
 
+    private var pushLevel = -1f
+    private var lastPushAt = 0L
+    private var pushFailedLogged = false
+    private val pushRunnable = Runnable { pushVolumeToPhone() }
+
+    /** The volume was changed with a remote (the stick's keys, the TV's own): the phone's slider is told, a moment later (a held key makes many). */
+    private fun scheduleVolumePush(level: Float) {
+        if (ReceiverState.current.status != Status.CONNECTED) return
+        pushLevel = level.coerceIn(0f, 1f)
+        handler.removeCallbacks(pushRunnable)
+        handler.postDelayed(pushRunnable, PUSH_DELAY_MS)
+    }
+
+    /**
+     * Classic AirPlay has no message from the receiver to the phone that says "the volume changed" (AirPlay 2 has). What exists is the phone's
+     * remote service, the one the receiver already asks to pause or skip: the remote apps of the iTunes days set a speaker's volume with
+     * `dmcp.device-volume` (dB, -144 for silence, -30 to 0 on the slider), and an iPhone may move its slider for it. Whether this iPhone does
+     * is tried here: if it does not, nothing is lost; if it does, the slider follows the TV's remote.
+     */
+    private fun pushVolumeToPhone() {
+        if (ReceiverState.current.status != Status.CONNECTED) return
+        val level = pushLevel
+        if (level < 0f) return
+        val db = if (level <= 0f) -144f else -30f + level * 30f
+        lastPushAt = SystemClock.elapsedRealtime()
+        RemoteControl.send("setproperty?dmcp.device-volume=" + String.format(Locale.US, "%.6f", db)) { status ->
+            if (status !in 200..299 && !pushFailedLogged) {
+                pushFailedLogged = true
+                Log.w(SESSION, "the phone's remote service did not take a volume (status $status): its slider will not follow the TV's remote")
+            }
+        }
+    }
+
     /** The remote changed the volume: apply it for real and show it. The phone's next change replaces it. */
     private fun setVolumeLevel(level: Float, fromRemote: Boolean = false) {
         applyOutput(level, fromRemote = fromRemote)
+        if (fromRemote) scheduleVolumePush(level)
         ReceiverState.update { it.copy(volume = level, volumeAtMs = SystemClock.elapsedRealtime()) }
     }
 
@@ -379,6 +414,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
                 }
             }
         }
+        lg.onOwnerVolume = { tv -> handler.post { scheduleVolumePush(TvVolume.levelFor(tv, ceilingNow())) } }
         UserKeys.listener = { lg.userKey() }
         TvAutoPicture.start(this)
         lg.onHomePressed = { handler.postDelayed({ reopenScreens() }, REOPEN_AFTER_HOME_MS) }
@@ -1087,6 +1123,8 @@ class ReceiverService : Service(), NativeBridge.Listener {
         val repeated = phoneGain >= 0f && VolumeScale.sameGain(gain, phoneGain)
         phoneGain = gain
         if (repeated) return
+        // the phone's slider following the volume pushed to it (see pushVolumeToPhone) is not its owner moving it: the push stands
+        if (SystemClock.elapsedRealtime() - lastPushAt < PUSH_ECHO_MS) return
         var level = VolumeScale.gainToLevel(gain)
         var exactGain: Float? = gain
         if (firstVolumeOfSession) {
@@ -1375,6 +1413,10 @@ class ReceiverService : Service(), NativeBridge.Listener {
         private const val VOLUME_WATCH_MS = 150L
         private const val STREAM_CENTER = 8
         private const val OUTPUT_STEPS = 16
+        private const val PUSH_DELAY_MS = 250L
+
+        /** After a push, the phone's slider reports the new volume back; for this long that is the echo, not its owner. */
+        private const val PUSH_ECHO_MS = 2_000L
 
         /** A progress update this recent before the audio ran dry was sent at the pause and is stale. */
         private const val PAUSE_PROGRESS_WINDOW_MS = 1500L

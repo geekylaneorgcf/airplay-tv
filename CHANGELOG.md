@@ -2,6 +2,13 @@
 
 ## [0.2.1] - fork
 
+- **rc.22.**
+  - **An experiment: the phone's slider follows the volume changed with a remote.** Classic AirPlay has no "volume changed" message to the
+    phone (AirPlay 2 has). When the volume is changed with the stick's remote keys or with the LG remote during a session, the receiver now
+    asks the phone's remote service (the one it already uses to pause and skip) to set the speaker volume (`dmcp.device-volume`, in dB), and
+    ignores the phone's own report of that slider move for two seconds so that the TV's volume is not snapped to the phone's steps. Whether
+    an iPhone moves its slider for it is not known; if it does not, nothing changes, and the log says so once ("the phone's remote service
+    did not take a volume") when the phone refuses.
 - **rc.21.**
   - **The phone's volume slider is the TV's real 0 to 100.** The slider used to be scaled into the TV's volume at connect (the TV at 30
     made the whole slider a range of 0 to 30). Now the TV stays where it is until the slider is moved, and from then on 70 % is a TV volume

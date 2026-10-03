@@ -46,6 +46,10 @@ class LgLink(private val context: Context, private val settings: Settings) {
     @Volatile
     var onTvVolumeInCharge: ((Boolean) -> Unit)? = null
 
+    /** Set by the service: called (on the worker) with the TV's volume (0 to 100) when its owner changed it with the TV's own remote during a session. */
+    @Volatile
+    var onOwnerVolume: ((Int) -> Unit)? = null
+
     /** Set by the service: called (on the worker) after Home was pressed to wake the TV, so that it can bring the player back to the front. */
     @Volatile
     var onHomePressed: (() -> Unit)? = null
@@ -584,6 +588,7 @@ class LgLink(private val context: Context, private val settings: Settings) {
         if (facts.level == tvLastSet) return
         if (SystemClock.elapsedRealtime() - tvLastSetAt < OWN_CHANGE_ECHO_MS) return
         Log.i(SERVICE, "LG the volume was changed on the TV (now ${facts.level})")
+        onOwnerVolume?.invoke(facts.level)
         tvReference = facts.level
         tvLastSet = facts.level
         tvRestoreTo = facts.level
