@@ -2,6 +2,11 @@
 
 ## [0.2.1] - fork
 
+- **rc.19.**
+  - **The TV no longer stays on its home screen after the Menu button.** The TV's own menu closes by itself after a while; a key sent to
+    it afterwards (Back, OK, or the Exit that closes the menu) could land on the input instead and send the TV to its LG home screen. While
+    the menu is in use (and four seconds after) a second connection watches the TV's front app; if a TV that was on an HDMI input goes to
+    its home screen, it is put straight back on that input.
 - **rc.18.**
   - **A quick panel for the LG TV, on a double press of the Menu button.** A single press still opens the TV's own settings (with the
     arrow keys, OK and Back steering them), as before; pressing Menu twice opens a list over the screen: *LG TV Settings* (the same menu),

@@ -23,6 +23,9 @@ object TvMenuMode {
     private const val TAG = "AirPlayTV-LG"
     private const val IDLE_MS = 10_000L
 
+    /** How long after the menu mode ended the guard still watches the TV. */
+    private const val GUARD_AFTER_MS = 4_000L
+
     /** A TV that has not accepted a connection after this long is off; the owner is told at once and the keys stay the app's. */
     private const val CONNECT_MS = 2_000
 
@@ -39,6 +42,9 @@ object TvMenuMode {
 
     // only touched on the worker
     private var remote: LgTv.Remote? = null
+
+    private val guardLock = Any()
+    private var guard: TvControl? = null
 
     private val idleEnd = Runnable { end("no key for ${IDLE_MS / 1000} s") }
 
@@ -130,10 +136,50 @@ object TvMenuMode {
         }
     }
 
+    /**
+     * The TV's menu closes by itself after a while, and a key that is sent to it afterwards (Back, OK, the Exit that closes the menu) can
+     * land on the input instead and send the TV to its own home screen. While the menu mode runs (and a few seconds after), a second
+     * connection watches the TV's front app; if the TV, which was on an HDMI input, goes to its home screen, it is put back on that input.
+     */
+    private fun startGuard(settings: Settings) {
+        Thread({
+            val tv = TvControl.open(settings, CONNECT_MS) ?: return@Thread
+            var before: String? = null
+            tv.onForegroundApp { app ->
+                if (before == null) {
+                    before = app
+                } else if (LgFacts.wentHome(before, app)) {
+                    val input = LgFacts.inputIdOf(before)
+                    Log.i(TAG, "the TV went to its home screen while its menu was in use: back to $input")
+                    if (input != null) Thread({ tv.switchInput(input) }, "lg-menu-guard-back").start()
+                }
+            }
+            synchronized(guardLock) {
+                guard?.close()
+                guard = tv
+            }
+            // the menu mode may have ended while the connection was being made
+            if (!active) endGuard()
+        }, "lg-menu-guard").apply { isDaemon = true }.start()
+    }
+
+    /** Lets the guard watch a few seconds more, so that the effect of the last key is seen, then closes it. */
+    private fun endGuard() {
+        Thread({
+            Thread.sleep(GUARD_AFTER_MS)
+            if (active) return@Thread
+            synchronized(guardLock) {
+                guard?.close()
+                guard = null
+            }
+        }, "lg-menu-guard-end").apply { isDaemon = true }.start()
+    }
+
     /** On the worker: closes the sockets and gives the keys back. */
     private fun finish() {
         active = false
         main.removeCallbacks(idleEnd)
+        endGuard()
         val open = remote ?: return
         remote = null
         try {
@@ -165,6 +211,7 @@ object TvMenuMode {
                 }
                 remote = result.remote
                 active = true // from here the arrow keys, OK and Back steer the TV
+                startGuard(settings)
                 main.removeCallbacks(idleEnd)
                 main.postDelayed(idleEnd, IDLE_MS)
                 toast(app, R.string.tv_menu_keys)

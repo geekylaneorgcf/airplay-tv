@@ -187,4 +187,14 @@ class LgSessionTest {
         assertEquals(emptyList<String>(), LgFacts.macAddresses(JSONObject("""{"payload":{}}""")))
         assertNotNull(LgFacts.macAddresses(JSONObject("{}")))
     }
+
+    @Test
+    fun `a TV that was on an HDMI input and shows its home screen has gone home`() {
+        org.junit.Assert.assertTrue(LgFacts.wentHome("com.webos.app.hdmi1", "com.webos.app.home"))
+        org.junit.Assert.assertTrue(LgFacts.wentHome("com.webos.app.hdmi2", "com.webos.app.livetv"))
+        org.junit.Assert.assertFalse(LgFacts.wentHome("com.webos.app.home", "com.webos.app.home"))
+        org.junit.Assert.assertFalse(LgFacts.wentHome("com.webos.app.hdmi1", "com.webos.app.hdmi2"))
+        org.junit.Assert.assertFalse(LgFacts.wentHome(null, "com.webos.app.home"))
+        org.junit.Assert.assertFalse(LgFacts.wentHome("com.webos.app.hdmi1", null))
+    }
 }

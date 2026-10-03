@@ -132,6 +132,12 @@ object LgFacts {
         return "HDMI_${match.groupValues[1]}"
     }
 
+    /** The apps that are the TV's own home screen or its tuner: where a TV that was on an HDMI input lands when a key sent to its menu leaves the input. */
+    private val HOME_APPS = setOf("com.webos.app.home", "com.webos.app.livetv")
+
+    /** Whether the TV, which showed [before], has gone to its own home screen (and so left an HDMI input it was on) by showing [now]. */
+    fun wentHome(before: String?, now: String?): Boolean = inputIdOf(before) != null && now != null && now in HOME_APPS
+
     /** The state in a power-state message (`Active`, `Active Standby`, `Screen Off`, `Suspend`, ...), or null when it names none. */
     fun powerState(message: JSONObject): String? =
         message.optJSONObject("payload")?.optString("state")?.takeIf { it.isNotEmpty() }

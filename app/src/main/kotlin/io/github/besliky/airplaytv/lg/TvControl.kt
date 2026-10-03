@@ -42,6 +42,10 @@ class TvControl(private val session: LgSession) : Closeable {
         return State(app, inputs, readPicture(), readSound(), readVolume(), readPower())
     }
 
+    /** The app in front (`com.webos.app.hdmi1` for an HDMI input), or null. */
+    fun foreground(): String? =
+        session.request("ssap://com.webos.applicationManager/getForegroundAppInfo", timeoutMs = READ_MS)?.let { LgFacts.foregroundApp(it) }
+
     fun readPicture(): String? =
         session.request("ssap://settings/getSystemSettings", TvPicture.readRequest(), READ_MS)?.let { TvPicture.read(it) }
 
