@@ -44,6 +44,7 @@ static struct {
     bool active;
     int ct;
     int rate;              /* the sample rate of this session's audio: 44100 or 48000 */
+    unsigned peek_tick;    /* counts the chunks written, for the debug log of what was decoded */
     AMediaCodec *aac;
     alac_file *alac;
     int16_t *pcm;          /* decode scratch buffer */
@@ -121,6 +122,17 @@ static void ring_reset_locked(void) {
 static void ring_write_locked(const int16_t *pcm, size_t frames) {
     if (!g_ap.ring || frames == 0) {
         return;
+    }
+    if (log_enabled(LOGL_DEBUG) && (g_ap.peek_tick++ % 256) == 0) {
+        /* in debug logs: whether what was decoded is sound, and how loud (the peak of this chunk, 32767 at the most) */
+        int peak = 0;
+        for (size_t i = 0; i < frames * CHANNELS; i++) {
+            int v = pcm[i] < 0 ? -pcm[i] : pcm[i];
+            if (v > peak) {
+                peak = v;
+            }
+        }
+        LOG_D(AUDIO, "decoded %zu frames, peak %d", frames, peak);
     }
     if (frames > g_ap.ring_frames) {
         pcm += (frames - g_ap.ring_frames) * CHANNELS;

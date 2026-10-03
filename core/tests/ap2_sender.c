@@ -37,6 +37,52 @@
 struct pair_definition pair_client_fruit; /* never used: Apple TV verification needs libplist */
 
 static int g_fd = -1;
+static const char *g_aac_path = NULL; /* buffered audio from an ADTS file (afconvert -f adts -d aac) instead of the sine as ALAC */
+static uint8_t *g_aac = NULL;
+static size_t g_aac_len = 0;
+static size_t g_aac_off[4096];
+static size_t g_aac_size[4096];
+static int g_aac_count = 0;
+static int g_aac_rate = 44100;
+
+/* Splits an ADTS file into its raw AAC frames. */
+static int load_aac(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        perror(path);
+        return -1;
+    }
+    fseek(f, 0, SEEK_END);
+    long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    g_aac = (uint8_t *) malloc((size_t) n);
+    g_aac_len = fread(g_aac, 1, (size_t) n, f);
+    fclose(f);
+    static const int rates[] = { 96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000 };
+    size_t pos = 0;
+    while (pos + 7 < g_aac_len && g_aac_count < 4096) {
+        const uint8_t *h = g_aac + pos;
+        if (h[0] != 0xff || (h[1] & 0xf0) != 0xf0) {
+            break;
+        }
+        size_t flen = (size_t) (((h[3] & 3) << 11) | (h[4] << 3) | (h[5] >> 5));
+        size_t hlen = (h[1] & 1) ? 7 : 9;
+        int idx = (h[2] >> 2) & 15;
+        if (idx < 12) {
+            g_aac_rate = rates[idx];
+        }
+        if (flen <= hlen || pos + flen > g_aac_len) {
+            break;
+        }
+        g_aac_off[g_aac_count] = pos + hlen;
+        g_aac_size[g_aac_count] = flen - hlen;
+        g_aac_count++;
+        pos += flen;
+    }
+    printf("%s: %d AAC frames at %d Hz\n", path, g_aac_count, g_aac_rate);
+    return g_aac_count > 0 ? 0 : -1;
+}
+
 static bool g_buffered = false; /* buffered audio (type 103) instead of realtime */
 static const char *g_abuse = ""; /* garbage, badtype, noshk, tamper, abrupt: what to do wrong, see main */
 static int g_cseq = 0;
@@ -190,7 +236,7 @@ static size_t alac_frame(uint8_t *out, int phase) {
 int main(int argc, char **argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
     if (argc < 3) {
-        fprintf(stderr, "usage: ap2_sender <ip> <port> [seconds] [--ntp] [--name NAME] [--buffered] [--abuse garbage|badtype|noshk|tamper|abrupt]\n");
+        fprintf(stderr, "usage: ap2_sender <ip> <port> [seconds] [--ntp] [--name NAME] [--buffered] [--aac FILE.aac] [--abuse garbage|badtype|noshk|tamper|abrupt]\n");
         return 2;
     }
     int seconds = argc > 3 && argv[3][0] != '-' ? atoi(argv[3]) : 6;
@@ -203,11 +249,17 @@ int main(int argc, char **argv) {
             name = argv[++i];
         } else if (strcmp(argv[i], "--buffered") == 0) {
             g_buffered = true;
+        } else if (strcmp(argv[i], "--aac") == 0 && i + 1 < argc) {
+            g_aac_path = argv[++i];
+            g_buffered = true;
         } else if (strcmp(argv[i], "--abuse") == 0 && i + 1 < argc) {
             g_abuse = argv[++i];
         }
     }
     if (sodium_init() < 0) {
+        return 2;
+    }
+    if (g_aac_path && load_aac(g_aac_path) != 0) {
         return 2;
     }
     g_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -342,17 +394,17 @@ int main(int argc, char **argv) {
         bp_node_t *d = bp_new_dict();
         bp_node_t *streams = bp_new_array();
         bp_node_t *s0 = bp_new_dict();
-        dset(s0, "audioFormat", 0x40000);
+        dset(s0, "audioFormat", g_aac_path ? (g_aac_rate == 48000 ? 0x800000 : 0x400000) : 0x40000);
         bp_dict_set(s0, "audioMode", bp_new_string("default"));
         dset(s0, "controlPort", ntohs(ctl.sin_port));
-        dset(s0, "ct", 2);
+        dset(s0, "ct", g_aac_path ? 4 : 2);
         bp_dict_set(s0, "isMedia", bp_new_bool(true));
         dset(s0, "latencyMax", 88200);
         dset(s0, "latencyMin", 11025);
         if (strcmp(g_abuse, "noshk") != 0) {
             bp_dict_set(s0, "shk", bp_new_data(shk, sizeof(shk)));
         }
-        dset(s0, "spf", 352);
+        dset(s0, "spf", g_aac_path ? 1024 : 352);
         dset(s0, "sr", 44100);
         dset(s0, "type", strcmp(g_abuse, "badtype") == 0 ? 110 : (g_buffered ? 103 : 96));
         bp_array_append(streams, s0);
@@ -415,15 +467,25 @@ int main(int argc, char **argv) {
             dset(d, "networkTimeFrac", 0);
             printf("SETRATEANCHORTI play -> %d\n", rtsp_plist("SETRATEANCHORTI", "rtsp://127.0.0.1/12345", d, NULL));
         }
-        int frames = seconds * 44100 / 352;
+        int step = g_aac_path ? 1024 : 352;
+        int rate = g_aac_path ? g_aac_rate : 44100;
+        int frames = seconds * rate / step;
+        uint32_t ssrc = g_aac_path ? (g_aac_rate == 48000 ? 0x17000000u : 0x16000000u) : 0xfaceu;
         uint64_t counter = 1;
         for (int i = 0; i < frames; i++) {
-            uint8_t plain[2048], pkt[2300];
-            size_t plen = alac_frame(plain, i);
-            uint32_t seq = 5000 + (uint32_t) i, ts = ts0 + (uint32_t) i * 352;
+            uint8_t plain[4096], pkt[4300];
+            size_t plen;
+            if (g_aac_path) {
+                int k = i % g_aac_count;
+                plen = g_aac_size[k];
+                memcpy(plain, g_aac + g_aac_off[k], plen);
+            } else {
+                plen = alac_frame(plain, i);
+            }
+            uint32_t seq = 5000 + (uint32_t) i, ts = ts0 + (uint32_t) i * (uint32_t) step;
             pkt[0] = (uint8_t) (seq >> 24); pkt[1] = (uint8_t) (seq >> 16); pkt[2] = (uint8_t) (seq >> 8); pkt[3] = (uint8_t) seq;
             pkt[4] = (uint8_t) (ts >> 24); pkt[5] = (uint8_t) (ts >> 16); pkt[6] = (uint8_t) (ts >> 8); pkt[7] = (uint8_t) ts;
-            pkt[8] = 0; pkt[9] = 0; pkt[10] = 0xfa; pkt[11] = 0xce;
+            pkt[8] = (uint8_t) (ssrc >> 24); pkt[9] = (uint8_t) (ssrc >> 16); pkt[10] = (uint8_t) (ssrc >> 8); pkt[11] = (uint8_t) ssrc;
             uint8_t nonce[12] = { 0 };
             for (int b = 0; b < 8; b++) {
                 nonce[4 + b] = (uint8_t) (counter >> (8 * b));
