@@ -14,6 +14,7 @@ receiver_stats_t g_stats;
 
 void stats_reset_session(void) {
     atomic_store(&g_stats.video_frames_in, 0);
+    atomic_store(&g_stats.audio_dropped_aead, 0);
     atomic_store(&g_stats.video_bytes_in, 0);
     atomic_store(&g_stats.video_keyframes_in, 0);
     atomic_store(&g_stats.video_frames_decoded, 0);

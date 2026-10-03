@@ -26,6 +26,8 @@ typedef struct {
     void *ops_ctx;
     uint8_t key[16];
     uint8_t iv[16];
+    bool aead;                    /* AirPlay 2 realtime audio: ChaCha20-Poly1305 with aead_key instead of AES-CBC, no sync or resend */
+    uint8_t aead_key[32];
     struct sockaddr_storage peer;
     uint16_t peer_control_port;   /* 0 disables retransmission requests */
     audio_format_t format;

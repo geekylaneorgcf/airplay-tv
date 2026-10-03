@@ -21,6 +21,7 @@
 #include <stdlib.h>
 #include <sys/resource.h>
 
+#include "ap2_pair.h"
 #include "crypto.h"
 #include "log.h"
 #include "netutil.h"
@@ -216,6 +217,25 @@ static void request_resend(void *ctx, uint16_t first, uint16_t count) {
     LOG_D(AUDIO, "requested %u missing packet(s) from %u", count, first);
 }
 
+/* AirPlay 2 realtime packet: RTP header, ciphertext with its 16-byte tag, then the 8-byte nonce. The 8 bytes after the sequence
+ * number (timestamp and source id) are authenticated. Returns the plaintext length, or 0 when the packet does not check out. */
+static size_t open_aead_packet(const audio_receiver_t *a, const uint8_t *pkt, size_t len, uint8_t *out, size_t cap) {
+    if (len < RTP_HEADER_LEN + AP2_TAG_LEN + 8 + 1) {
+        return 0;
+    }
+    size_t clen = len - RTP_HEADER_LEN - 8 - AP2_TAG_LEN;
+    if (clen > cap) {
+        return 0;
+    }
+    uint8_t nonce[12] = { 0 };
+    memcpy(nonce + 4, pkt + len - 8, 8);
+    const uint8_t *cipher = pkt + RTP_HEADER_LEN;
+    if (ap2_aead_open(a->p.aead_key, nonce, pkt + 4, 8, cipher, clen, cipher + clen, out) != 0) {
+        return 0;
+    }
+    return clen;
+}
+
 static bool is_empty_packet(const audio_receiver_t *a, const uint8_t *pkt, size_t len) {
     static const uint8_t kNoData[4] = { 0x00, 0x68, 0x34, 0x00 };
     if (len == RTP_HEADER_LEN) {
@@ -229,13 +249,23 @@ static bool is_empty_packet(const audio_receiver_t *a, const uint8_t *pkt, size_
 }
 
 static void handle_rtp(audio_receiver_t *a, uint8_t *pkt, size_t len) {
-    if (len < RTP_HEADER_LEN || (pkt[0] & 0xc0) != 0x80 || is_empty_packet(a, pkt, len)) {
+    if (len < RTP_HEADER_LEN || (pkt[0] & 0xc0) != 0x80 || (!a->p.aead && is_empty_packet(a, pkt, len))) {
         return;
     }
     uint16_t seq = rd16be(pkt + 2);
     uint32_t ts = rd32be(pkt + 4);
     uint8_t *payload = pkt + RTP_HEADER_LEN;
     size_t payload_len = len - RTP_HEADER_LEN;
+    if (a->p.aead) {
+        uint8_t plain[AUDIO_SLOT_SIZE];
+        size_t n = open_aead_packet(a, pkt, len, plain, sizeof(plain));
+        if (n > 0) {
+            audio_jitter_put(&a->jitter, seq, ts, plain, n);
+        } else {
+            stat_add(&g_stats.audio_dropped_aead, 1);
+        }
+        return;
+    }
     if (payload_len > AUDIO_SLOT_SIZE) {
         return;
     }
@@ -249,6 +279,9 @@ static void handle_control(audio_receiver_t *a, uint8_t *pkt, size_t len,
                            const struct sockaddr_storage *from, socklen_t from_len) {
     if (len < 4) {
         return;
+    }
+    if (a->p.aead) {
+        return; /* AirPlay 2 control packets carry PTP time and its own retransmission format: not used */
     }
     if (!a->have_control_addr) {
         a->control_addr = *from;

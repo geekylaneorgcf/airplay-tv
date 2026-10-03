@@ -35,6 +35,9 @@ typedef struct {
                                  * An iPhone draws the AirPlay icon from it. */
     char srcvers[16];           /* advertised source version; empty = AIRPLAY_SOURCE_VERSION */
     bool video;                 /* advertise AirPlay video (the sender gives a URL and the receiver plays it) */
+    int airplay2;               /* 0: AirPlay as before. 1: also AirPlay 2 for audio (transient pairing, encrypted control channel,
+                                 * realtime stream), without the timing and buffered-audio feature bits. 2: the same with those bits
+                                 * set, as shairport-sync advertises them (a sender may then ask for what is not offered). */
 } airplay_config_t;
 
 typedef struct {

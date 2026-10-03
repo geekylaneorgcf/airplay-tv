@@ -83,6 +83,7 @@ typedef struct {
     _Atomic int32_t video_codec;
     _Atomic int32_t video_decoder_resets;
     _Atomic uint64_t audio_packets_in;
+    _Atomic uint64_t audio_dropped_aead;   /* AirPlay 2 audio packets that did not authenticate */
     _Atomic uint64_t audio_packets_lost;
     _Atomic uint64_t audio_frames_decoded;
     _Atomic uint64_t audio_underruns;
