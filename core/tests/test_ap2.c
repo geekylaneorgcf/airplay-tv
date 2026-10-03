@@ -8,8 +8,14 @@
  * (at your option) any later version.
  */
 
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <pthread.h>
 #include <stdlib.h>
+#include <time.h>
+#include <unistd.h>
 
+#include "ap2_buffered.h"
 #include "ap2_pair.h"
 #include "test.h"
 
@@ -139,4 +145,123 @@ TEST(ap2_pair_setup_refuses_normal_pairing_and_bad_steps) {
     uint8_t shared[AP2_SHARED_LEN];
     CHECK(!ap2_pair_done(p, shared));
     ap2_pair_free(p);
+}
+
+/* ---- buffered audio ---- */
+
+static pthread_mutex_t g_bl = PTHREAD_MUTEX_INITIALIZER;
+static uint32_t g_bts[400];
+static int g_bn;
+static int g_bflushes;
+
+static void b_frame(void *ctx, const uint8_t *d, size_t len, uint32_t ts, uint64_t remote) {
+    (void) ctx; (void) d; (void) len; (void) remote;
+    pthread_mutex_lock(&g_bl);
+    if (g_bn < 400) g_bts[g_bn++] = ts;
+    pthread_mutex_unlock(&g_bl);
+}
+static void b_flush(void *ctx) { (void) ctx; pthread_mutex_lock(&g_bl); g_bflushes++; pthread_mutex_unlock(&g_bl); }
+
+static int b_count(void) { pthread_mutex_lock(&g_bl); int n = g_bn; pthread_mutex_unlock(&g_bl); return n; }
+static void b_sleep(int ms) { struct timespec t = { ms / 1000, (long) (ms % 1000) * 1000000L }; nanosleep(&t, NULL); }
+
+static bool b_wait(int target, int ms) {
+    for (int i = 0; i < ms / 10; i++) {
+        if (b_count() >= target) return true;
+        b_sleep(10);
+    }
+    return b_count() >= target;
+}
+
+/* One sealed block as the sender writes it: [len BE16][seq][ts][ssrc][cipher+tag][nonce]. */
+static size_t b_block(uint8_t *out, const uint8_t key[32], uint32_t seq, uint32_t ts, uint64_t counter) {
+    uint8_t plain[64];
+    memset(plain, (int) (seq & 0xff), sizeof(plain));
+    uint8_t *pkt = out + 2;
+    wr32be(pkt, seq); wr32be(pkt + 4, ts); wr32be(pkt + 8, 0xface);
+    uint8_t nonce[12] = { 0 };
+    for (int i = 0; i < 8; i++) nonce[4 + i] = (uint8_t) (counter >> (8 * i));
+    ap2_aead_seal(key, nonce, pkt + 4, 8, plain, sizeof(plain), pkt + 12, pkt + 12 + sizeof(plain));
+    memcpy(pkt + 12 + sizeof(plain) + 16, nonce + 4, 8);
+    size_t total = 2 + 12 + sizeof(plain) + 16 + 8;
+    out[0] = (uint8_t) (total >> 8);
+    out[1] = (uint8_t) total;
+    return total;
+}
+
+TEST(ap2_seq_order_wraps_at_23_bits) {
+    CHECK(ap2_seq_before(5, 6));
+    CHECK(!ap2_seq_before(6, 5));
+    CHECK(!ap2_seq_before(7, 7));
+    CHECK(ap2_seq_before(0x7ffffe, 2));   /* across the wrap */
+    CHECK(!ap2_seq_before(2, 0x7ffffe));
+}
+
+TEST(ap2_buffered_orders_paces_and_flushes) {
+    g_bn = 0;
+    g_bflushes = 0;
+    media_sink_ops_t ops;
+    memset(&ops, 0, sizeof(ops));
+    ops.audio_frame = b_frame;
+    ops.audio_flush = b_flush;
+    uint8_t key[32];
+    memset(key, 0x5a, sizeof(key));
+    ap2_buffered_params_t p;
+    memset(&p, 0, sizeof(p));
+    p.ops = &ops;
+    memcpy(p.key, key, 32);
+    struct sockaddr_in *peer = (struct sockaddr_in *) &p.peer;
+    peer->sin_family = AF_INET;
+    peer->sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    p.samples_per_frame = 352;
+    p.sample_rate = 44100;
+    uint16_t dport = 0, cport = 0;
+    ap2_buffered_t *b = ap2_buffered_start(&p, 1 << 20, &dport, &cport);
+    CHECK(b != NULL);
+    if (!b) return;
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    struct sockaddr_in to;
+    memset(&to, 0, sizeof(to));
+    to.sin_family = AF_INET;
+    to.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    to.sin_port = htons(dport);
+    CHECK(connect(fd, (struct sockaddr *) &to, sizeof(to)) == 0);
+    /* 200 blocks (1.6 s of audio) at once, a bad one among them */
+    uint8_t buf[256];
+    for (uint32_t i = 0; i < 200; i++) {
+        size_t n = b_block(buf, key, 1000 + i, 5000 + i * 352, i + 1);
+        if (i == 3) buf[40] ^= 1;          /* does not authenticate: skipped, the stream goes on */
+        CHECK(write(fd, buf, n) == (ssize_t) n);
+    }
+    b_sleep(100);
+    CHECK_EQ(b_count(), 0);                /* nothing plays before the rate anchor */
+    ap2_buffered_rate(b, true, 5000, true);
+    CHECK(b_wait(30, 1000));               /* the first quarter second comes at once */
+    int early = b_count();
+    CHECK(early >= 30 && early <= 60);     /* ... and not the whole buffer */
+    b_sleep(1000);
+    int later = b_count();
+    CHECK(later > early + 60 && later < 200);   /* then at the speed of the audio */
+    pthread_mutex_lock(&g_bl);
+    CHECK(g_bts[0] == 5000);
+    bool ordered = true;
+    for (int i = 1; i < g_bn; i++) {
+        if (g_bts[i] <= g_bts[i - 1]) ordered = false;
+    }
+    pthread_mutex_unlock(&g_bl);
+    CHECK(ordered);
+    /* an immediate flush drops what is queued before the given block and stops playing until the next anchor */
+    ap2_buffered_flush(b, false, 0, 1185);
+    b_sleep(50);
+    int stopped = b_count();
+    b_sleep(200);
+    CHECK_EQ(b_count(), stopped);
+    CHECK(g_bflushes >= 1);
+    ap2_buffered_rate(b, true, 5000 + 185 * 352, true);
+    CHECK(b_wait(stopped + 1, 1000));
+    pthread_mutex_lock(&g_bl);
+    CHECK_EQ(g_bts[stopped], 5000 + 185 * 352);
+    pthread_mutex_unlock(&g_bl);
+    close(fd);
+    ap2_buffered_stop(b);
 }

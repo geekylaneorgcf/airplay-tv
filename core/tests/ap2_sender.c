@@ -37,6 +37,7 @@
 struct pair_definition pair_client_fruit; /* never used: Apple TV verification needs libplist */
 
 static int g_fd = -1;
+static bool g_buffered = false; /* buffered audio (type 103) instead of realtime */
 static const char *g_abuse = ""; /* garbage, badtype, noshk, tamper, abrupt: what to do wrong, see main */
 static int g_cseq = 0;
 static struct pair_cipher_context *g_cipher = NULL;
@@ -189,7 +190,7 @@ static size_t alac_frame(uint8_t *out, int phase) {
 int main(int argc, char **argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
     if (argc < 3) {
-        fprintf(stderr, "usage: ap2_sender <ip> <port> [seconds] [--ntp] [--name NAME] [--abuse garbage|badtype|noshk|tamper|abrupt]\n");
+        fprintf(stderr, "usage: ap2_sender <ip> <port> [seconds] [--ntp] [--name NAME] [--buffered] [--abuse garbage|badtype|noshk|tamper|abrupt]\n");
         return 2;
     }
     int seconds = argc > 3 && argv[3][0] != '-' ? atoi(argv[3]) : 6;
@@ -200,6 +201,8 @@ int main(int argc, char **argv) {
             ntp = true;
         } else if (strcmp(argv[i], "--name") == 0 && i + 1 < argc) {
             name = argv[++i];
+        } else if (strcmp(argv[i], "--buffered") == 0) {
+            g_buffered = true;
         } else if (strcmp(argv[i], "--abuse") == 0 && i + 1 < argc) {
             g_abuse = argv[++i];
         }
@@ -351,7 +354,7 @@ int main(int argc, char **argv) {
         }
         dset(s0, "spf", 352);
         dset(s0, "sr", 44100);
-        dset(s0, "type", strcmp(g_abuse, "badtype") == 0 ? 103 : 96);
+        dset(s0, "type", strcmp(g_abuse, "badtype") == 0 ? 110 : (g_buffered ? 103 : 96));
         bp_array_append(streams, s0);
         bp_dict_set(d, "streams", streams);
         bp_node_t *reply = NULL;
@@ -389,6 +392,74 @@ int main(int argc, char **argv) {
             bp_node_t *fb = bp_parse(body, bl);
             printf("  streams in the answer: %zu\n", fb ? bp_count(bp_dict_get(fb, "streams")) : 0);
         }
+    }
+
+    if (g_buffered) {
+        /* the sender connects to the data port over TCP and pushes sealed blocks ahead of time; playing starts with the rate anchor */
+        int tcp = socket(AF_INET, SOCK_STREAM, 0);
+        struct sockaddr_in t = a;
+#ifdef __APPLE__
+        t.sin_len = sizeof(t);
+#endif
+        t.sin_port = htons(data_port);
+        if (connect(tcp, (struct sockaddr *) &t, sizeof(t)) != 0) {
+            perror("buffered connect");
+            return 1;
+        }
+        uint32_t ts0 = 222222;
+        {
+            bp_node_t *d = bp_new_dict();
+            bp_dict_set(d, "rate", bp_new_uint(1));
+            dset(d, "rtpTime", ts0);
+            dset(d, "networkTimeSecs", 1000);
+            dset(d, "networkTimeFrac", 0);
+            printf("SETRATEANCHORTI play -> %d\n", rtsp_plist("SETRATEANCHORTI", "rtsp://127.0.0.1/12345", d, NULL));
+        }
+        int frames = seconds * 44100 / 352;
+        uint64_t counter = 1;
+        for (int i = 0; i < frames; i++) {
+            uint8_t plain[2048], pkt[2300];
+            size_t plen = alac_frame(plain, i);
+            uint32_t seq = 5000 + (uint32_t) i, ts = ts0 + (uint32_t) i * 352;
+            pkt[0] = (uint8_t) (seq >> 24); pkt[1] = (uint8_t) (seq >> 16); pkt[2] = (uint8_t) (seq >> 8); pkt[3] = (uint8_t) seq;
+            pkt[4] = (uint8_t) (ts >> 24); pkt[5] = (uint8_t) (ts >> 16); pkt[6] = (uint8_t) (ts >> 8); pkt[7] = (uint8_t) ts;
+            pkt[8] = 0; pkt[9] = 0; pkt[10] = 0xfa; pkt[11] = 0xce;
+            uint8_t nonce[12] = { 0 };
+            for (int b = 0; b < 8; b++) {
+                nonce[4 + b] = (uint8_t) (counter >> (8 * b));
+            }
+            unsigned long long clen = 0;
+            crypto_aead_chacha20poly1305_ietf_encrypt(pkt + 12, &clen, plain, plen, pkt + 4, 8, NULL, nonce, shk);
+            memcpy(pkt + 12 + clen, nonce + 4, 8);
+            counter++;
+            size_t total = 2 + 12 + (size_t) clen + 8;
+            uint8_t head[2] = { (uint8_t) (total >> 8), (uint8_t) total };
+            if (write(tcp, head, 2) != 2 || write(tcp, pkt, total - 2) != (ssize_t) (total - 2)) {
+                perror("buffered write");
+                return 1;
+            }
+        }
+        printf("pushed %d blocks (%d s of audio) at once\n", frames, seconds);
+        if (strcmp(g_abuse, "pauseflush") == 0) {
+            sleep(2);
+            bp_node_t *d = bp_new_dict();
+            bp_dict_set(d, "rate", bp_new_uint(0));
+            printf("pause -> %d\n", rtsp_plist("SETRATEANCHORTI", "rtsp://127.0.0.1/12345", d, NULL));
+            sleep(1);
+            bp_node_t *f = bp_new_dict();
+            dset(f, "flushUntilSeq", 5000 + 300);
+            dset(f, "flushUntilTS", ts0 + 300 * 352);
+            printf("flush -> %d\n", rtsp_plist("FLUSHBUFFERED", "rtsp://127.0.0.1/12345", f, NULL));
+            bp_node_t *r = bp_new_dict();
+            bp_dict_set(r, "rate", bp_new_uint(1));
+            dset(r, "rtpTime", ts0 + 300 * 352);
+            dset(r, "networkTimeSecs", 1002);
+            dset(r, "networkTimeFrac", 0);
+            printf("resume -> %d\n", rtsp_plist("SETRATEANCHORTI", "rtsp://127.0.0.1/12345", r, NULL));
+        }
+        sleep((unsigned) seconds + 1);
+        printf("TEARDOWN -> %d\n", rtsp("TEARDOWN", "rtsp://127.0.0.1/12345", NULL, NULL, 0, NULL, NULL));
+        return 0;
     }
 
     /* the audio: 352-sample ALAC frames, each sealed: RTP header, ciphertext and tag, then the 8-byte nonce */

@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "airplay.h"
@@ -21,23 +22,31 @@
 #include "util.h"
 
 static unsigned g_frames;
+static double g_t0;
 static size_t g_bytes;
 
 static bool m_audio_start(void *ctx, const audio_format_t *f) {
     (void) ctx;
+    {
+        struct timespec t;
+        clock_gettime(CLOCK_MONOTONIC, &t);
+        g_t0 = (double) t.tv_sec + (double) t.tv_nsec / 1e9;
+    }
     printf("[server] audio_start ct=%d spf=%d sr=%d ch=%d\n", f->ct, f->samples_per_frame, f->sample_rate, f->channels);
     fflush(stdout);
     return true;
 }
 static void m_audio_frame(void *ctx, const uint8_t *d, size_t len, uint32_t rtp, uint64_t ts) {
     (void) ctx; (void) d; (void) ts;
-    if (g_frames++ % 128 == 0) {
-        printf("[server] audio frame #%u len=%zu rtp=%u\n", g_frames, len, rtp);
+    if (g_frames++ % 64 == 0) {
+        struct timespec t;
+        clock_gettime(CLOCK_MONOTONIC, &t);
+        printf("[server] %6.2fs audio frame #%u len=%zu rtp=%u\n", (double) t.tv_sec + (double) t.tv_nsec / 1e9 - g_t0, g_frames, len, rtp);
         fflush(stdout);
     }
     g_bytes += len;
 }
-static void m_audio_flush(void *ctx) { (void) ctx; }
+static void m_audio_flush(void *ctx) { (void) ctx; printf("[server] audio_flush\n"); fflush(stdout); g_frames = 0; }
 static void m_audio_volume(void *ctx, float db) { (void) ctx; printf("[server] volume %.1f dB\n", (double) db); fflush(stdout); }
 static void m_audio_stop(void *ctx) {
     (void) ctx;

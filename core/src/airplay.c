@@ -25,6 +25,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+#include "ap2_buffered.h"
 #include "ap2_pair.h"
 #include "audio_rtp.h"
 #include "bplist.h"
@@ -112,6 +113,7 @@ struct session {
     ntp_client_t *ntp;
     mirror_receiver_t *mirror;
     audio_receiver_t *audio;
+    ap2_buffered_t *buffered;   /* AirPlay 2 buffered audio (stream type 103) instead of audio */
     char client_name[64];
     char client_model[32];
     _Atomic bool stream_lost;
@@ -174,6 +176,7 @@ struct airplay_server {
 /* The AirPlay 2 feature set of shairport-sync (audio, metadata the classic way, transient pairing, core utils pairing and
  * encryption), without bits 40 (buffered audio) and 41 (PTP) in mode 1: this receiver cannot keep PTP time, which needs UDP ports
  * 319 and 320, so it offers realtime audio only. Mode 2 sets them as well, to see what a sender does with them. */
+#define AP2_BUFFERED_BYTES (1024 * 1024)   /* audio that may wait in the receiver, told to the sender */
 #define FEATURES_AP2 0x00018040405F4A00ull
 
 uint64_t airplay_features(const airplay_config_t *config) {
@@ -420,9 +423,11 @@ static void session_stop_video(session_t *session) {
 
 static void session_stop_audio(session_t *session) {
     airplay_server_t *s = session->server;
-    if (session->audio) {
+    if (session->audio || session->buffered) {
         audio_stop(session->audio);
+        ap2_buffered_stop(session->buffered);
         session->audio = NULL;
+        session->buffered = NULL;
         if (s->media->audio_stop) {
             s->media->audio_stop(s->media_ctx);
         }
@@ -1699,7 +1704,7 @@ static void handle_teardown(airplay_server_t *s, conn_t *c, const rtsp_request_t
     for (size_t i = 0; i < bp_count(streams); i++) {
         uint64_t type = 0;
         bp_get_uint(bp_dict_get(bp_array_get(streams, i), "type"), &type);
-        audio |= type == 96;
+        audio |= type == 96 || type == 103;
         video |= type == 110;
     }
     bp_free(root);
@@ -1987,7 +1992,8 @@ static void ap2_handle_info(airplay_server_t *s, conn_t *c, rtsp_reply_t *reply)
     bp_dict_set(root, "sourceVersion", bp_new_string(s->cfg.srcvers));
     bp_node_t *formats = bp_new_dict();
     dict_set_uint(formats, "audioStream", 0x1440800);
-    dict_set_uint(formats, "bufferStream", 0x40000ull | 0x400000ull | 0x200000ull | 0x800000ull);
+    /* only what the audio output plays: ALAC 44100 Hz 16 bit stereo (bit 18) */
+    dict_set_uint(formats, "bufferStream", 0x40000ull);
     bp_dict_set(root, "supportedFormats", formats);
     txt_entry_t entries[24];
     uint8_t txt[1024];
@@ -2042,6 +2048,96 @@ static session_t *ap2_begin_session(airplay_server_t *s, conn_t *c, bp_node_t *r
         s->ev.session_started(s->ev.ctx, session->client_name, session->client_model);
     }
     return session;
+}
+
+/* The buffered audio stream (type 103): the sender connects over TCP and sends the audio well ahead of time. */
+static bp_node_t *setup_buffered_stream(airplay_server_t *s, session_t *session, bp_node_t *stream, const uint8_t *shk) {
+    uint64_t format = 0;
+    bp_get_uint(bp_dict_get(stream, "audioFormat"), &format);
+    uint64_t spf = 352;
+    bp_get_uint(bp_dict_get(stream, "spf"), &spf);
+    LOG_I(AUDIO, "AirPlay 2 buffered audio requested: format 0x%llx, spf %llu", (unsigned long long) format, (unsigned long long) spf);
+    if (format != 0 && !(format & 0x40000)) {
+        LOG_W(AUDIO, "AirPlay 2 buffered audio format 0x%llx is not offered (only ALAC 44100 Hz)", (unsigned long long) format);
+        return NULL;
+    }
+    session_stop_audio(session);
+
+    ap2_buffered_params_t p;
+    memset(&p, 0, sizeof(p));
+    p.ops = s->media;
+    p.ops_ctx = s->media_ctx;
+    memcpy(p.key, shk, 32);
+    p.peer = session->owner->peer;
+    p.samples_per_frame = (spf > 0 && spf <= 4096) ? (int) spf : 352;
+    p.sample_rate = 44100;
+
+    audio_format_t f;
+    memset(&f, 0, sizeof(f));
+    f.ct = AUDIO_CT_ALAC;
+    f.samples_per_frame = p.samples_per_frame;
+    f.sample_rate = 44100;
+    f.channels = 2;
+    f.is_media = true;
+    if (s->media->audio_start && !s->media->audio_start(s->media_ctx, &f)) {
+        LOG_W(AUDIO, "audio output could not be started");
+    }
+    if (s->media->audio_volume) {
+        s->media->audio_volume(s->media_ctx, s->volume_db);
+    }
+    uint16_t dport = 0;
+    uint16_t cport = 0;
+    session->buffered = ap2_buffered_start(&p, AP2_BUFFERED_BYTES, &dport, &cport);
+    secure_zero(p.key, sizeof(p.key));
+    if (!session->buffered) {
+        if (s->media->audio_stop) {
+            s->media->audio_stop(s->media_ctx);
+        }
+        return NULL;
+    }
+    atomic_store_explicit(&g_stats.audio_ct, AUDIO_CT_ALAC, memory_order_relaxed);
+    LOG_I(AUDIO, "AirPlay 2 buffered audio stream set up (ALAC, spf=%d)", p.samples_per_frame);
+    bp_node_t *out = bp_new_dict();
+    dict_set_uint(out, "type", 103);
+    dict_set_uint(out, "dataPort", dport);
+    dict_set_uint(out, "controlPort", cport);
+    dict_set_uint(out, "audioBufferSize", AP2_BUFFERED_BYTES);
+    return out;
+}
+
+/* SETRATEANCHORTI: "rate" 1 plays from the block at "rtpTime", 0 pauses. The network time of the anchor is a PTP time and is not used. */
+static void ap2_handle_rate_anchor(conn_t *c, const rtsp_request_t *req) {
+    session_t *session = c->session;
+    bp_node_t *root = parse_plist_body(req);
+    if (root && session && session->buffered) {
+        uint64_t rate = 0;
+        uint64_t rtp = 0;
+        bool have_rate = bp_get_uint(bp_dict_get(root, "rate"), &rate);
+        bool have_rtp = bp_get_uint(bp_dict_get(root, "rtpTime"), &rtp);
+        LOG_I(AUDIO, "AirPlay 2 rate anchor: rate %llu%s", (unsigned long long) rate, have_rtp ? " with an RTP time" : "");
+        if (have_rate) {
+            ap2_buffered_rate(session->buffered, (rate & 1) != 0, (uint32_t) rtp, have_rtp);
+        }
+    }
+    bp_free(root);
+}
+
+static void ap2_handle_flush_buffered(conn_t *c, const rtsp_request_t *req) {
+    session_t *session = c->session;
+    bp_node_t *root = parse_plist_body(req);
+    if (root && session && session->buffered) {
+        uint64_t from = 0;
+        uint64_t until = 0;
+        bool have_from = bp_get_uint(bp_dict_get(root, "flushFromSeq"), &from);
+        bool have_until = bp_get_uint(bp_dict_get(root, "flushUntilSeq"), &until);
+        LOG_I(AUDIO, "AirPlay 2 flush: %s", have_from ? "a range" : "everything before a block");
+        if (have_until) {
+            ap2_buffered_flush(session->buffered, have_from, (uint32_t) from, (uint32_t) until);
+        }
+    } else if (session && session->audio) {
+        audio_request_flush(session->audio, -1);
+    }
+    bp_free(root);
 }
 
 static void ap2_handle_setup(airplay_server_t *s, conn_t *c, const rtsp_request_t *req, rtsp_reply_t *reply) {
@@ -2109,6 +2205,8 @@ static void ap2_handle_setup(airplay_server_t *s, conn_t *c, const rtsp_request_
             bp_node_t *desc = NULL;
             if (type == 96 && shk && shk_len == 32) {
                 desc = setup_audio_stream(s, session, stream, shk);
+            } else if (type == 103 && shk && shk_len == 32) {
+                desc = setup_buffered_stream(s, session, stream, shk);
             } else {
                 LOG_W(AIRPLAY, "AirPlay 2: stream type %llu is not offered here (realtime audio only)", (unsigned long long) type);
                 reply->close_connection = true;
@@ -2128,10 +2226,10 @@ static void ap2_handle_post(airplay_server_t *s, conn_t *c, const rtsp_request_t
     (void) s;
     (void) req;
     bp_node_t *root = bp_new_dict();
-    if (strcmp(req->url, "/feedback") == 0 && c->session && c->session->audio) {
+    if (strcmp(req->url, "/feedback") == 0 && c->session && (c->session->audio || c->session->buffered)) {
         bp_node_t *list = bp_new_array();
         bp_node_t *stream = bp_new_dict();
-        dict_set_uint(stream, "type", 96);
+        dict_set_uint(stream, "type", c->session->buffered ? 103 : 96);
         bp_dict_set(stream, "sr", bp_new_real(44100.0));
         bp_array_append(list, stream);
         bp_dict_set(root, "streams", list);
@@ -2166,7 +2264,7 @@ static bool ap2_try_handle(airplay_server_t *s, conn_t *c, const rtsp_request_t 
     if (strcmp(m, "OPTIONS") == 0) {
         rtsp_reply_header(reply, "Public",
                           "ANNOUNCE, SETUP, RECORD, PAUSE, FLUSH, FLUSHBUFFERED, TEARDOWN, OPTIONS, POST, GET, PUT, SETPEERS, "
-                          "SETPEERSX, SETRATEANCHORTIME, GET_PARAMETER, SET_PARAMETER");
+                          "SETPEERSX, SETRATEANCHORTI, GET_PARAMETER, SET_PARAMETER");
         return true;
     }
     if (!c->ap2c.on) {
@@ -2180,13 +2278,15 @@ static bool ap2_try_handle(airplay_server_t *s, conn_t *c, const rtsp_request_t 
         ap2_handle_post(s, c, req, reply);
         return true;
     }
-    if (strcmp(m, "SETPEERS") == 0 || strcmp(m, "SETPEERSX") == 0 || strcmp(m, "SETRATEANCHORTIME") == 0 || strcmp(m, "PAUSE") == 0) {
-        return true; /* timing peers and the clock anchor belong to PTP, which is not kept: acknowledged and ignored */
+    if (strcmp(m, "SETPEERS") == 0 || strcmp(m, "SETPEERSX") == 0 || strcmp(m, "PAUSE") == 0) {
+        return true; /* timing peers belong to PTP, which is not kept: acknowledged and ignored */
+    }
+    if (strncmp(m, "SETRATEANCHORTI", 15) == 0) {
+        ap2_handle_rate_anchor(c, req);
+        return true;
     }
     if (strcmp(m, "FLUSHBUFFERED") == 0) {
-        if (c->session && c->session->audio) {
-            audio_request_flush(c->session->audio, -1);
-        }
+        ap2_handle_flush_buffered(c, req);
         return true;
     }
     return false;
@@ -2208,7 +2308,7 @@ static void trace_request(conn_t *c, const rtsp_request_t *req) {
         size_t n = strlen(names);
         snprintf(names + n, sizeof(names) - n, "%s%.24s", i ? "," : "", req->headers[i].name);
     }
-    char shape[320] = "";
+    char shape[1100] = "";
     bool secret = strstr(req->url, "pair") != NULL || strstr(req->url, "fp-") != NULL;
     if (!secret && ct && req->body && req->body_len > 0) {
         if (str_ieq(ct, CT_PARAMS) && req->body_len < 100) {
@@ -2225,8 +2325,12 @@ static void trace_request(conn_t *c, const rtsp_request_t *req) {
             }
         }
     }
-    LOG_I(AIRPLAY, "request %s %s %s body %zu type %s ua %s proto %s headers %s%s%s", req->method, req->url, req->protocol,
-          req->body_len, ct ? ct : "-", ua ? ua : "-", pv ? pv : "-", names, shape[0] ? " body-shape " : "", shape);
+    LOG_I(AIRPLAY, "request %s %.60s %s body %zu type %s ua %s proto %s headers %s", req->method, req->url, req->protocol, req->body_len,
+          ct ? ct : "-", ua ? ua : "-", pv ? pv : "-", names);
+    /* a log line is short: the shape of a long body goes in pieces */
+    for (size_t off = 0, part = 1; shape[off]; off += 170, part++) {
+        LOG_I(AIRPLAY, "  body-shape %zu: %.170s", part, shape + off);
+    }
 }
 
 static void handle_request(airplay_server_t *s, conn_t *c, const rtsp_request_t *req, rtsp_reply_t *reply) {
