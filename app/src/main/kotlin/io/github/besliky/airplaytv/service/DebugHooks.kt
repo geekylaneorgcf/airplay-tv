@@ -1,5 +1,6 @@
 package io.github.besliky.airplaytv.service
 
+import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -23,6 +24,7 @@ object DebugHooks {
 
     const val ACTION_STEAL_FOCUS = "io.github.besliky.airplaytv.dev.action.STEAL_FOCUS"
 
+    @SuppressLint("UnspecifiedRegisterReceiverFlag") // the flag exists from API 33; this runs on 28, and only in debug builds
     fun install(context: Context) {
         val manager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         val handler = Handler(Looper.getMainLooper())
