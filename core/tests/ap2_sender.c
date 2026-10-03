@@ -83,6 +83,7 @@ static int load_aac(const char *path) {
     return g_aac_count > 0 ? 0 : -1;
 }
 
+static int g_event_update_ok = -1; /* the receiver's first message on the event connection was a good updateInfo: 1, bad 0, unchecked -1 */
 static bool g_buffered = false; /* buffered audio (type 103) instead of realtime */
 static const char *g_abuse = ""; /* garbage, badtype, noshk, tamper, abrupt: what to do wrong, see main */
 static int g_cseq = 0;
@@ -363,6 +364,67 @@ int main(int argc, char **argv) {
                 free(enc);
             }
             printf("  event connection opened\n");
+            /* what the receiver says first on this connection (shairport-sync sends an updateInfo request): read it with pair_ap's cipher,
+             * which checks the receiver's events keys from the other side */
+            if (ec) {
+                uint8_t wire[8192];
+                size_t have = 0;
+                uint8_t *plain_all = NULL;
+                size_t plain_all_len = 0;
+                for (int tries = 0; tries < 15; tries++) {
+                    struct pollfd pf = { .fd = ev, .events = POLLIN };
+                    if (poll(&pf, 1, 100) <= 0) {
+                        if (have) break;
+                        continue;
+                    }
+                    ssize_t n = read(ev, wire + have, sizeof(wire) - have);
+                    if (n <= 0) break;
+                    have += (size_t) n;
+                    struct pollfd more = { .fd = ev, .events = POLLIN };
+                    if (poll(&more, 1, 150) > 0) continue;
+                    break;
+                }
+                if (have) {
+                    uint8_t *plain = NULL;
+                    size_t plain_len = 0;
+                    ssize_t used = pair_decrypt(&plain, &plain_len, wire, have, ec);
+                    if (used < 0 || !plain) {
+                        printf("  event update: could not be opened with the events keys (%s)\n", pair_cipher_errmsg(ec));
+                        g_event_update_ok = 0;
+                    } else {
+                        append(&plain_all, &plain_all_len, plain, plain_len);
+                        free(plain);
+                        char first[80];
+                        size_t m = 0;
+                        while (m < plain_all_len && m < sizeof(first) - 1 && plain_all[m] != '\r') {
+                            first[m] = (char) plain_all[m];
+                            m++;
+                        }
+                        first[m] = '\0';
+                        const uint8_t *body = NULL;
+                        for (size_t i = 0; i + 3 < plain_all_len; i++) {
+                            if (memcmp(plain_all + i, "\r\n\r\n", 4) == 0) {
+                                body = plain_all + i + 4;
+                                break;
+                            }
+                        }
+                        bp_node_t *msg = body ? bp_parse(body, plain_all_len - (size_t) (body - plain_all)) : NULL;
+                        const char *type = msg ? bp_get_string(bp_dict_get(msg, "type")) : NULL;
+                        bp_node_t *value = msg ? bp_dict_get(msg, "value") : NULL;
+                        const char *sender_addr = value ? bp_get_string(bp_dict_get(value, "senderAddress")) : NULL;
+                        size_t txt_len = 0;
+                        const uint8_t *txt = value ? bp_get_data(bp_dict_get(value, "txtAirPlay"), &txt_len) : NULL;
+                        printf("  event update: \"%s\", %zu bytes, type %s, senderAddress %s, txtAirPlay %zu bytes\n", first, plain_all_len,
+                               type ? type : "?", sender_addr ? sender_addr : "-", txt ? txt_len : 0);
+                        g_event_update_ok = (type && strcmp(type, "updateInfo") == 0 && txt) ? 1 : 0;
+                        bp_free(msg);
+                    }
+                    free(plain_all);
+                } else {
+                    printf("  event update: nothing arrived\n");
+                    g_event_update_ok = 0;
+                }
+            }
         }
     }
 
@@ -521,6 +583,10 @@ int main(int argc, char **argv) {
         }
         sleep((unsigned) seconds + 1);
         printf("TEARDOWN -> %d\n", rtsp("TEARDOWN", "rtsp://127.0.0.1/12345", NULL, NULL, 0, NULL, NULL));
+        if (g_event_update_ok == 0) {
+            printf("FAIL: the receiver's first message on the event connection was not a good updateInfo\n");
+            return 1;
+        }
         return 0;
     }
 
@@ -581,5 +647,9 @@ int main(int argc, char **argv) {
     }
     printf("TEARDOWN -> %d\n", rtsp("TEARDOWN", "rtsp://127.0.0.1/12345", NULL, NULL, 0, NULL, NULL));
     (void) timing_port;
+    if (g_event_update_ok == 0) {
+        printf("FAIL: the receiver's first message on the event connection was not a good updateInfo\n");
+        return 1;
+    }
     return 0;
 }

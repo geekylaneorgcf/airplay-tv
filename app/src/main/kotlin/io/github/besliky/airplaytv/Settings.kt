@@ -230,12 +230,13 @@ class Settings(context: Context) {
         set(value) = prefs.edit().putLong(KEY_SPEAKER_UNTIL, value).apply()
 
     /**
-     * AirPlay 2 for music (see docs/AIRPLAY2.md): [AIRPLAY2_OFF], [AIRPLAY2_ON], or [AIRPLAY2_FULL] (the same, with the timing and
-     * buffered-audio feature bits set, to see what a phone does with them). Not for mirroring, photos or video, which stay AirPlay 1.
+     * AirPlay 2 for music (see docs/AIRPLAY2.md): [AIRPLAY2_OFF], [AIRPLAY2_ON], [AIRPLAY2_FULL] (the same, with the timing and
+     * buffered-audio feature bits set, to see what a phone does with them) or [AIRPLAY2_NTP] (the buffered-audio bit only, no PTP
+     * bit, so that a phone uses the old timing). Not for mirroring, photos or video, which stay AirPlay 1.
      * Switched on as a trial: [airplay2TrialUntil] is when it switches itself off again if no phone has started a session by then.
      */
     var airplay2: Int
-        get() = prefs.getInt(KEY_AIRPLAY2, AIRPLAY2_OFF).coerceIn(AIRPLAY2_OFF, AIRPLAY2_FULL)
+        get() = prefs.getInt(KEY_AIRPLAY2, AIRPLAY2_OFF).coerceIn(AIRPLAY2_OFF, AIRPLAY2_NTP)
         set(value) = prefs.edit().putInt(KEY_AIRPLAY2, value).apply()
 
     /** Wall-clock milliseconds at which an AirPlay 2 trial that no session has confirmed ends; 0 when there is no trial running. */
@@ -264,6 +265,7 @@ class Settings(context: Context) {
         const val AIRPLAY2_OFF = 0
         const val AIRPLAY2_ON = 1
         const val AIRPLAY2_FULL = 2
+        const val AIRPLAY2_NTP = 3
         const val KEY_SLEEP = "sleep_after_minutes"
         const val KEY_RETURN = "return_to_player"
         const val KEY_TV_MENU = "tv_menu_button"

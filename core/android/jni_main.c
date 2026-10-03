@@ -508,7 +508,7 @@ static jint JNICALL n_start(JNIEnv *env, jclass cls, jbyteArray name, jbyteArray
     cfg.display_fps = fps;
     cfg.hevc = hevc;
     cfg.video = video;
-    cfg.airplay2 = airplay2 > 0 ? (airplay2 > 2 ? 2 : airplay2) : 0;
+    cfg.airplay2 = airplay2 > 0 ? (airplay2 > 3 ? 3 : airplay2) : 0;
 
     airplay_events_t ev = {
         .ctx = NULL,

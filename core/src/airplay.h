@@ -37,7 +37,8 @@ typedef struct {
     bool video;                 /* advertise AirPlay video (the sender gives a URL and the receiver plays it) */
     int airplay2;               /* 0: AirPlay as before. 1: also AirPlay 2 for audio (transient pairing, encrypted control channel,
                                  * realtime stream), without the timing and buffered-audio feature bits. 2: the same with those bits
-                                 * set, as shairport-sync advertises them (a sender may then ask for what is not offered). */
+                                 * set, as shairport-sync advertises them (a sender then wants PTP, which this device cannot do).
+                                 * 3: with the buffered-audio bit only, no PTP bit: a sender should use the old NTP timing. */
 } airplay_config_t;
 
 typedef struct {

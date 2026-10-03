@@ -86,6 +86,7 @@ class AdvancedActivity : SettingsPage() {
                     settings.airplay2 == Settings.AIRPLAY2_OFF -> getString(R.string.value_off)
                     settings.airplay2TrialUntil > 0L -> getString(R.string.value_airplay2_trial)
                     settings.airplay2 == Settings.AIRPLAY2_FULL -> getString(R.string.value_airplay2_full)
+                    settings.airplay2 == Settings.AIRPLAY2_NTP -> getString(R.string.value_airplay2_ntp)
                     else -> getString(R.string.value_on)
                 },
             )
@@ -125,7 +126,7 @@ class AdvancedActivity : SettingsPage() {
         }
     }
 
-    /** AirPlay 2 for music is a trial that undoes itself (see [Settings.airplay2]): off, then on, then on with the timing bits. */
+    /** AirPlay 2 for music is a trial that undoes itself (see [Settings.airplay2]): off, on, on with the timing bits, on without PTP. */
     private fun toggleAirplay2() {
         when (settings.airplay2) {
             Settings.AIRPLAY2_OFF -> if (settings.requirePin) {
@@ -138,6 +139,11 @@ class AdvancedActivity : SettingsPage() {
             Settings.AIRPLAY2_ON -> {
                 settings.airplay2TrialUntil = System.currentTimeMillis() + AIRPLAY2_TRIAL_MS
                 settings.airplay2 = Settings.AIRPLAY2_FULL
+                bind()
+            }
+            Settings.AIRPLAY2_FULL -> {
+                settings.airplay2TrialUntil = System.currentTimeMillis() + AIRPLAY2_TRIAL_MS
+                settings.airplay2 = Settings.AIRPLAY2_NTP
                 bind()
             }
             else -> {

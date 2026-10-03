@@ -56,6 +56,7 @@
     <string name="setting_airplay2">AirPlay 2 (Music)</string>
     <string name="value_airplay2_trial">On (trial)</string>
     <string name="value_airplay2_full">On, with timing</string>
+    <string name="value_airplay2_ntp">On, buffered, no PTP</string>
     <string name="dialog_airplay2_title">Try AirPlay 2 for music?</string>
     <string name="dialog_airplay2_message">The receiver offers music to iPhones the AirPlay 2 way, which is what lets the volume buttons and the slider follow each other. With this on, only music works: screen mirroring, photos and video are not offered. If no iPhone starts a session within 30 minutes, it switches back by itself. You can switch it off here at any time.</string>
     <string name="dialog_airplay2_confirm">Try It</string>

@@ -16,7 +16,10 @@
 
 #include "airplay.h"
 
+#include <arpa/inet.h>
 #include <errno.h>
+#include <ifaddrs.h>
+#include <net/if.h>
 #include <netinet/tcp.h>
 #include <poll.h>
 #include <pthread.h>
@@ -175,13 +178,21 @@ struct airplay_server {
 
 /* The AirPlay 2 feature set of shairport-sync (audio, metadata the classic way, transient pairing, core utils pairing and
  * encryption), without bits 40 (buffered audio) and 41 (PTP) in mode 1: this receiver cannot keep PTP time, which needs UDP ports
- * 319 and 320, so it offers realtime audio only. Mode 2 sets them as well, to see what a sender does with them. */
-#define AP2_BUFFERED_BYTES (1024 * 1024)   /* audio that may wait in the receiver, told to the sender */
+ * 319 and 320, so it offers realtime audio only. Mode 2 sets both, to see what a sender does with them (an iPhone then sends PTP
+ * packets to ports nobody listens on and takes the buffered stream down again at once). Mode 3 sets bit 40 only: buffered audio
+ * without PTP, which should make a sender use the old NTP timing. */
+#define AP2_BUFFERED_BYTES (8 * 1024 * 1024)   /* audio that may wait in the receiver, told to the sender (shairport-sync says 8 MiB too) */
 #define FEATURES_AP2 0x00018040405F4A00ull
 
 uint64_t airplay_features(const airplay_config_t *config) {
     if (config->airplay2 > 0) {
-        return FEATURES_AP2 | (config->airplay2 >= 2 ? ((1ull << 40) | (1ull << 41)) : 0);
+        uint64_t f = FEATURES_AP2;
+        if (config->airplay2 == 2) {
+            f |= (1ull << 40) | (1ull << 41);
+        } else if (config->airplay2 >= 3) {
+            f |= 1ull << 40;
+        }
+        return f;
     }
     uint64_t f = FEATURES_BASE;
     if (config->require_pin) {
@@ -1771,15 +1782,49 @@ static void trace_plist(const bp_node_t *node, char *out, size_t cap, int depth)
 /* ------------------------------------------------------------------------- */
 /* AirPlay 2 (cfg.airplay2)                                                    */
 
-/* The event connection: the sender opens it after SETUP and, sealed with the events keys, talks on it. Nothing it says is needed
- * here yet, so it is read and dropped; the connection is kept open for as long as the control connection lives. */
+static bp_node_t *ap2_info_dict(airplay_server_t *s, conn_t *c);
+
+/* The event connection: the sender opens it after SETUP and, sealed with the events keys, it carries what the receiver has to say
+ * to the sender. Like shairport-sync, the receiver speaks first: an "updateInfo" request that repeats what /info says. What the
+ * sender says on it is not needed (it is read, shown at INFO for the first messages, and dropped); the connection is kept open for
+ * as long as the control connection lives. */
 struct ap2_events {
     int listen_fd;
     int fd;
     uint8_t shared[AP2_SHARED_LEN];
+    uint8_t *hello;           /* the first message, a complete RTSP request in clear text, sealed when it is sent */
+    size_t hello_len;
     _Atomic bool stop;
     pthread_t thread;
 };
+
+/* The updateInfo request: POST /command with {type: "updateInfo", value: the /info plist}. Built like shairport-sync builds it
+ * (no CSeq). NULL when it cannot be made. */
+static uint8_t *ap2_update_info_message(airplay_server_t *s, conn_t *c, size_t *out_len) {
+    bp_node_t *root = bp_new_dict();
+    if (!root) {
+        return NULL;
+    }
+    bp_dict_set(root, "type", bp_new_string("updateInfo"));
+    bp_dict_set(root, "value", ap2_info_dict(s, c));
+    uint8_t *body = NULL;
+    size_t body_len = 0;
+    int rc = bp_write(root, &body, &body_len);
+    bp_free(root);
+    if (rc != 0 || !body) {
+        return NULL;
+    }
+    char head[160];
+    int hn = snprintf(head, sizeof(head), "POST /command RTSP/1.0\r\nContent-Length: %zu\r\nContent-Type: " CT_BPLIST "\r\n\r\n", body_len);
+    uint8_t *msg = hn > 0 ? (uint8_t *) malloc((size_t) hn + body_len) : NULL;
+    if (msg) {
+        memcpy(msg, head, (size_t) hn);
+        memcpy(msg + hn, body, body_len);
+        *out_len = (size_t) hn + body_len;
+    }
+    free(body);
+    return msg;
+}
 
 static void *ap2_events_thread(void *arg) {
     struct ap2_events *e = (struct ap2_events *) arg;
@@ -1793,8 +1838,20 @@ static void *ap2_events_thread(void *arg) {
         LOG_I(AIRPLAY, "AirPlay 2 event connection opened");
         ap2_cipher_t cipher;
         ap2_cipher_init(&cipher, e->shared, AP2_SHARED_LEN, AP2_CHANNEL_EVENTS, true);
+        if (e->hello && e->hello_len > 0) {
+            size_t cap = e->hello_len + (e->hello_len / AP2_BLOCK_MAX + 1) * (2 + AP2_TAG_LEN);
+            uint8_t *sealed = (uint8_t *) malloc(cap);
+            size_t n = sealed ? ap2_seal(&cipher, e->hello, e->hello_len, sealed, cap) : 0;
+            if (n > 0 && net_send_all(e->fd, sealed, n, 3000) == 0) {
+                LOG_I(AIRPLAY, "AirPlay 2 event connection: updateInfo sent (%zu bytes)", e->hello_len);
+            } else {
+                LOG_W(AIRPLAY, "AirPlay 2 event connection: updateInfo could not be sent");
+            }
+            free(sealed);
+        }
         uint8_t in[4096], out[4096];
         size_t have = 0;
+        int shown = 0;
         while (!atomic_load(&e->stop)) {
             struct pollfd p = { .fd = e->fd, .events = POLLIN };
             if (poll(&p, 1, 100) <= 0) {
@@ -1810,8 +1867,17 @@ static void *ap2_events_thread(void *arg) {
                 LOG_W(AIRPLAY, "AirPlay 2 event data did not authenticate");
                 break;
             }
-            if (made) {
-                LOG_D(AIRPLAY, "AirPlay 2 event data: %zu bytes", made);
+            if (made && shown < 6) {
+                /* what the sender answers or asks on this connection: the size and the first line (status or request line) */
+                char text[64];
+                size_t m = 0;
+                while (m < made && m < sizeof(text) - 1 && out[m] != '\r' && out[m] != '\n') {
+                    text[m] = (out[m] >= 32 && out[m] < 127) ? (char) out[m] : '.';
+                    m++;
+                }
+                text[m] = '\0';
+                LOG_I(AIRPLAY, "AirPlay 2 event data (%zu bytes): %s", made, text);
+                shown++;
             }
             memmove(in, in + used, have - used);
             have -= used;
@@ -1833,11 +1899,12 @@ static void ap2_events_stop(struct ap2_events *e) {
     net_close(&e->listen_fd);
     net_close(&e->fd);
     secure_zero(e->shared, sizeof(e->shared));
+    free(e->hello);
     free(e);
 }
 
 /* Opens the port for the event connection and returns it, or 0. */
-static uint16_t ap2_events_start(conn_t *c) {
+static uint16_t ap2_events_start(airplay_server_t *s, conn_t *c) {
     if (c->events) {
         ap2_events_stop(c->events);
         c->events = NULL;
@@ -1854,8 +1921,10 @@ static uint16_t ap2_events_start(conn_t *c) {
         return 0;
     }
     memcpy(e->shared, c->ap2_shared, sizeof(e->shared));
+    e->hello = ap2_update_info_message(s, c, &e->hello_len);
     if (pthread_create(&e->thread, NULL, ap2_events_thread, e) != 0) {
         net_close(&e->listen_fd);
+        free(e->hello);
         free(e);
         return 0;
     }
@@ -1929,14 +1998,57 @@ static void ap2_free_conn(conn_t *c) {
     secure_zero(c->ap2_shared, sizeof(c->ap2_shared));
 }
 
+/* An address as the phone must read it: without the "%interface" suffix net_addr_to_string adds to a link-local address (the number
+ * is an interface of this device and means something else, or nothing, on the phone). */
+static void ap2_addr_text(const struct sockaddr_storage *in, char *out, size_t cap) {
+    struct sockaddr_storage ss = *in;
+    net_normalize_addr(&ss, NULL);
+    if (ss.ss_family == AF_INET6) {
+        ((struct sockaddr_in6 *) &ss)->sin6_scope_id = 0;
+    }
+    net_addr_to_string(&ss, out, cap);
+}
+
 static void ap2_local_ip(const conn_t *c, char *out, size_t cap) {
     struct sockaddr_storage ss;
     socklen_t len = sizeof(ss);
     out[0] = '\0';
     if (getsockname(c->fd, (struct sockaddr *) &ss, &len) == 0) {
-        net_normalize_addr(&ss, NULL);
-        net_addr_to_string(&ss, out, cap);
+        ap2_addr_text(&ss, out, cap);
     }
+}
+
+/* Adds every address of this device that is up (not the loopback) to a plist array of strings, the way shairport-sync lists its
+ * own addresses for the clock peers; "first" (the address the sender came to) goes first. */
+static void ap2_add_local_addresses(bp_node_t *array, const char *first) {
+    int count = 0;
+    if (first && first[0]) {
+        bp_array_append(array, bp_new_string(first));
+        count++;
+    }
+    struct ifaddrs *ifs = NULL;
+    if (getifaddrs(&ifs) != 0 || !ifs) {
+        return;
+    }
+    for (struct ifaddrs *it = ifs; it && count < 8; it = it->ifa_next) {
+        if (!it->ifa_addr || !(it->ifa_flags & IFF_UP) || (it->ifa_flags & IFF_LOOPBACK)) {
+            continue;
+        }
+        if (it->ifa_addr->sa_family != AF_INET && it->ifa_addr->sa_family != AF_INET6) {
+            continue;
+        }
+        struct sockaddr_storage ss;
+        memset(&ss, 0, sizeof(ss));
+        memcpy(&ss, it->ifa_addr, it->ifa_addr->sa_family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6));
+        char text[64];
+        ap2_addr_text(&ss, text, sizeof(text));
+        if (!text[0] || (first && strcmp(text, first) == 0)) {
+            continue;
+        }
+        bp_array_append(array, bp_new_string(text));
+        count++;
+    }
+    freeifaddrs(ifs);
 }
 
 static void ap2_handle_pair_setup(airplay_server_t *s, conn_t *c, const rtsp_request_t *req, rtsp_reply_t *reply) {
@@ -1961,9 +2073,8 @@ static void ap2_handle_pair_setup(airplay_server_t *s, conn_t *c, const rtsp_req
     }
 }
 
-/* /info the AirPlay 2 way: what this receiver is and can do, in one plist. */
-static void ap2_handle_info(airplay_server_t *s, conn_t *c, rtsp_reply_t *reply) {
-    (void) c;
+/* /info the AirPlay 2 way: what this receiver is and can do, in one plist. Also what the "updateInfo" event repeats. */
+static bp_node_t *ap2_info_dict(airplay_server_t *s, conn_t *c) {
     bp_node_t *root = bp_new_dict();
     char fex[24], psi[40];
     fex_string(s->features, fex, sizeof(fex));
@@ -1991,6 +2102,17 @@ static void ap2_handle_info(airplay_server_t *s, conn_t *c, rtsp_reply_t *reply)
     bp_dict_set(root, "pk", bp_new_data(s->identity.public_key, ED25519_KEY_SIZE));
     bp_dict_set(root, "initialVolume", bp_new_real(s->volume_db));
     bp_dict_set(root, "sourceVersion", bp_new_string(s->cfg.srcvers));
+    if (c) {
+        /* "address:port" of the sender, as shairport-sync tells it */
+        char ip[64];
+        ap2_addr_text(&c->peer, ip, sizeof(ip));
+        struct sockaddr_storage ps = c->peer;
+        net_normalize_addr(&ps, NULL);
+        unsigned port = ps.ss_family == AF_INET6 ? ntohs(((struct sockaddr_in6 *) &ps)->sin6_port) : ntohs(((struct sockaddr_in *) &ps)->sin_port);
+        char sender[96];
+        snprintf(sender, sizeof(sender), "%s:%u", ip, port);
+        bp_dict_set(root, "senderAddress", bp_new_string(sender));
+    }
     bp_node_t *formats = bp_new_dict();
     dict_set_uint(formats, "audioStream", 0x1440800);
     /* ALAC and AAC-LC at 44100 Hz and AAC-LC at 48000 Hz: what the audio output plays. With ALAC alone offered an iPhone did not start a
@@ -2002,7 +2124,11 @@ static void ap2_handle_info(airplay_server_t *s, conn_t *c, rtsp_reply_t *reply)
     int n = airplay_txt_airplay(s, entries, 24);
     size_t len = airplay_txt_encode(entries, n, txt, sizeof(txt));
     bp_dict_set(root, "txtAirPlay", bp_new_data(txt, len));
-    reply_plist(reply, root);
+    return root;
+}
+
+static void ap2_handle_info(airplay_server_t *s, conn_t *c, rtsp_reply_t *reply) {
+    reply_plist(reply, ap2_info_dict(s, c));
 }
 
 /* The first SETUP of a sender (name, model, timing) makes the session; the later ones add the audio stream. */
@@ -2165,8 +2291,10 @@ static void ap2_handle_setup(airplay_server_t *s, conn_t *c, const rtsp_request_
                 return;
             }
         }
-        uint16_t event_port = ap2_events_start(c);
+        uint16_t event_port = ap2_events_start(s, c);
         dict_set_uint(out, "eventPort", event_port);
+        LOG_I(AIRPLAY, "AirPlay 2 SETUP reply: event port %u, %s timing", (unsigned) event_port,
+              session && timing && strcmp(timing, "NTP") == 0 ? "NTP" : "PTP (this device's addresses as the clock peer)");
         if (session && timing && strcmp(timing, "NTP") == 0) {
             uint64_t timing_port = 0;
             bp_get_uint(bp_dict_get(root, "timingPort"), &timing_port);
@@ -2175,12 +2303,14 @@ static void ap2_handle_setup(airplay_server_t *s, conn_t *c, const rtsp_request_
             session->ntp = ntp_client_start(&c->peer, timing_port <= 0xffff ? (uint16_t) timing_port : 0, &local_timing);
             dict_set_uint(out, "timingPort", local_timing);
         } else {
-            /* PTP needs UDP ports 319 and 320, which an app cannot open: say so by naming only this address as a clock peer */
+            /* PTP needs UDP ports 319 and 320, which an app cannot open (a phone that is told this is a PTP receiver sends its clock
+             * packets there all the same). The answer is the one shairport-sync gives: this device's addresses, the one the sender came
+             * to first and the same as the peer's ID. */
             char ip[64];
             ap2_local_ip(c, ip, sizeof(ip));
             bp_node_t *peer = bp_new_dict();
             bp_node_t *addresses = bp_new_array();
-            bp_array_append(addresses, bp_new_string(ip));
+            ap2_add_local_addresses(addresses, ip);
             bp_dict_set(peer, "Addresses", addresses);
             bp_dict_set(peer, "ID", bp_new_string(ip));
             bp_dict_set(out, "timingPeerInfo", peer);
@@ -2224,17 +2354,17 @@ static void ap2_handle_setup(airplay_server_t *s, conn_t *c, const rtsp_request_
 /* Heartbeat and commands of an AirPlay 2 sender; the answer to a heartbeat names the running streams. */
 static void ap2_handle_post(airplay_server_t *s, conn_t *c, const rtsp_request_t *req, rtsp_reply_t *reply) {
     (void) s;
-    (void) req;
-    bp_node_t *root = bp_new_dict();
+    /* shairport-sync answers /command and /audioMode with an empty 200, and /feedback with the running stream or an empty 200 */
     if (strcmp(req->url, "/feedback") == 0 && c->session && (c->session->audio || c->session->buffered)) {
+        bp_node_t *root = bp_new_dict();
         bp_node_t *list = bp_new_array();
         bp_node_t *stream = bp_new_dict();
         dict_set_uint(stream, "type", c->session->buffered ? 103 : 96);
-        bp_dict_set(stream, "sr", bp_new_real(44100.0));
+        bp_dict_set(stream, "sr", bp_new_real(c->session->buffered ? 48000.0 : 44100.0));
         bp_array_append(list, stream);
         bp_dict_set(root, "streams", list);
+        reply_plist(reply, root);
     }
-    reply_plist(reply, root);
 }
 
 /* The AirPlay 2 requests this receiver answers itself. Returns true when the request was handled. */
@@ -2276,6 +2406,10 @@ static bool ap2_try_handle(airplay_server_t *s, conn_t *c, const rtsp_request_t 
     }
     if (strcmp(m, "POST") == 0 && (strcmp(url, "/feedback") == 0 || strcmp(url, "/command") == 0 || strcmp(url, "/audioMode") == 0)) {
         ap2_handle_post(s, c, req, reply);
+        return true;
+    }
+    if (strcmp(m, "RECORD") == 0) {
+        rtsp_reply_header(reply, "Audio-Latency", "0");
         return true;
     }
     if (strcmp(m, "SETPEERS") == 0 || strcmp(m, "SETPEERSX") == 0 || strcmp(m, "PAUSE") == 0) {
@@ -2334,6 +2468,26 @@ static void trace_request(conn_t *c, const rtsp_request_t *req) {
     /* a log line is short: the shape of a long body goes in pieces */
     for (size_t off = 0, part = 1; shape[off]; off += 170, part++) {
         LOG_I(AIRPLAY, "  body-shape %zu: %.170s", part, shape + off);
+    }
+}
+
+/* The answer to a request that trace_request showed: the status, the size and the shape of a plist body (what the receiver told the
+ * sender, so a session can be read from the log). Only for AirPlay 2 connections, and never for pairing or FairPlay. */
+static void trace_reply(const conn_t *c, const rtsp_request_t *req, const rtsp_reply_t *reply) {
+    if (c->trace > 80 || !c->ap2c.on || strstr(req->url, "pair") != NULL || strstr(req->url, "fp-") != NULL) {
+        return;
+    }
+    char shape[400] = "";
+    if (reply->body && reply->body_len >= 8 && memcmp(reply->body, "bplist00", 8) == 0) {
+        bp_node_t *root = bp_parse(reply->body, reply->body_len);
+        if (root) {
+            trace_plist(root, shape, sizeof(shape), 0);
+            bp_free(root);
+        }
+    }
+    LOG_I(AIRPLAY, "  -> %d, body %zu", reply->status, reply->body_len);
+    for (size_t off = 0, part = 1; shape[off]; off += 170, part++) {
+        LOG_I(AIRPLAY, "  -> shape %zu: %.170s", part, shape + off);
     }
 }
 
@@ -2437,9 +2591,10 @@ static bool process_rx(airplay_server_t *s, conn_t *c) {
             LOG_D(AIRPLAY, "%s %s", req->method, req->url);
             trace_request(c, req);
             handle_request(s, c, req, &reply);
+            trace_reply(c, req, &reply);
         }
         if (strcmp(req->protocol, "RTSP/1.0") == 0) {
-            if (strcmp(req->method, "RECORD") != 0) {
+            if (strcmp(req->method, "RECORD") != 0 && !c->ap2c.on) {
                 rtsp_reply_header(&reply, "Audio-Jack-Status", "connected; type=digital");
             }
             char server_header[40];
