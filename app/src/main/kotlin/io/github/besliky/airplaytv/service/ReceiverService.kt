@@ -358,6 +358,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
         audio.onTrack = { sessionId -> effects.attach(sessionId) }
         audio.onStopped = { effects.release() }
         audio.onFocus = { change -> onAudioFocus(change) }
+        if (BuildConfig.DEBUG) DebugHooks.install(this)
         lg = LgLink(this, settings).also { link ->
             link.onTvVolumeInCharge = { inCharge ->
                 handler.post {
