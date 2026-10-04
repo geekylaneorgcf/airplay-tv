@@ -183,7 +183,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
                     takeVolumeKeys(true)
                     return
                 }
-                setVolumeLevel(VolumeScale.stepped(currentVolume(), index - STREAM_CENTER, OUTPUT_STEPS), fromRemote = true)
+                setVolumeLevel(VolumeScale.stepped(currentVolume(), index - STREAM_CENTER, OUTPUT_STEPS))
             }
         } catch (e: RuntimeException) {
             Log.w(SESSION, "volume watch failed", e)
@@ -208,15 +208,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
             toggleMute()
         } else {
             val step = if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) 1 else -1
-            setVolumeLevel(
-                if (tvVolumeInCharge && lg.tvSliderLevel() >= 0f) {
-                    // the TV's own scale: one step of the TV's volume per press, from where the TV is
-                    (currentVolume() + step * (1f / ceilingNow())).coerceIn(0f, 1f)
-                } else {
-                    VolumeScale.stepped(currentVolume(), step, OUTPUT_STEPS)
-                },
-                fromRemote = true,
-            )
+            setVolumeLevel(VolumeScale.stepped(currentVolume(), step, OUTPUT_STEPS))
         }
         Log.i(SESSION, "remote volume key: the level is now ${"%.2f".format(ReceiverState.current.volume)}")
     }
@@ -226,18 +218,14 @@ class ReceiverService : Service(), NativeBridge.Listener {
         val current = currentVolume()
         if (current > 0f) {
             levelBeforeMute = current
-            setVolumeLevel(0f, fromRemote = true)
+            setVolumeLevel(0f)
         } else {
-            setVolumeLevel(levelBeforeMute.coerceAtLeast(1f / OUTPUT_STEPS), fromRemote = true)
+            setVolumeLevel(levelBeforeMute.coerceAtLeast(1f / OUTPUT_STEPS))
         }
     }
 
     /** The volume as a slider position 0..1; one value for the phone's slider and the TV remote. */
-    private fun currentVolume(): Float {
-        // while the TV's volume is in charge the TV's own volume is the starting point of a step (the phone's slider may stand anywhere)
-        if (tvVolumeInCharge) lg.tvSliderLevel().let { if (it >= 0f) return it }
-        return ReceiverState.current.volume.let { if (it < 0f) 1f else it }
-    }
+    private fun currentVolume(): Float = ReceiverState.current.volume.let { if (it < 0f) 1f else it }
 
     private var pushLevel = -1f
     private var lastPushAt = 0L
@@ -273,9 +261,10 @@ class ReceiverService : Service(), NativeBridge.Listener {
     }
 
     /** The remote changed the volume: apply it for real and show it. The phone's next change replaces it. */
-    private fun setVolumeLevel(level: Float, fromRemote: Boolean = false) {
-        applyOutput(level, fromRemote = fromRemote)
-        if (fromRemote) scheduleVolumePush(level)
+    private fun setVolumeLevel(level: Float) {
+        applyOutput(level)
+        // the remote moved the slider: the phone's slider is asked to follow (see pushVolumeToPhone)
+        scheduleVolumePush(level)
         ReceiverState.update { it.copy(volume = level, volumeAtMs = SystemClock.elapsedRealtime()) }
     }
 
@@ -286,7 +275,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
      * Puts the slider position [level] on the speakers: scaled into the ceiling of the volume limits, and either as the receiver's own
      * gain or, while the TV's volume is in charge, as the TV's volume with the receiver's output at full scale.
      */
-    private fun applyOutput(level: Float, phoneGain: Float? = null, fromRemote: Boolean = false) {
+    private fun applyOutput(level: Float, phoneGain: Float? = null) {
         val ceiling = ceilingNow()
         val gain = when {
             tvVolumeInCharge -> 1f
@@ -296,7 +285,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
         }
         audio.setVolume(gain)
         Log.i(SESSION, "volume: slider ${"%.2f".format(level)}, ceiling $ceiling%, output gain ${"%.3f".format(gain)}${if (tvVolumeInCharge) " (the TV's volume is in charge)" else ""}")
-        lg.volume(level, fromRemote)
+        lg.volume(level)
         scheduleVolumeCue(level)
     }
 
@@ -305,9 +294,8 @@ class ReceiverService : Service(), NativeBridge.Listener {
     private val volumeCue = Runnable {
         val level = cueLevel
         if (level < 0f) return@Runnable
-        // the TV's own scale while it is in charge, else the slider's position within the ceiling
-        val percent = if (tvVolumeInCharge) TvVolume.absolute(level, ceilingNow()) else Math.round(level * ceilingNow())
-        LauncherLink.volume(this, percent)
+        // the slider's position within the ceiling, as a percent
+        LauncherLink.volume(this, Math.round(level * ceilingNow()))
     }
 
     /** The home screen's volume cue: the last level of a burst of changes, a moment after it. */
@@ -437,7 +425,6 @@ class ReceiverService : Service(), NativeBridge.Listener {
                 }
             }
         }
-        lg.onOwnerVolume = { tv -> handler.post { scheduleVolumePush(TvVolume.levelFor(tv, ceilingNow())) } }
         UserKeys.listener = { lg.userKey() }
         TvAutoPicture.start(this)
         TvSchedules.start(this)

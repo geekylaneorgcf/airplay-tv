@@ -31,10 +31,10 @@ import org.json.JSONObject
  *   the owner's Home press does, and wake it over the network too when it can (Wake-on-LAN, needs the TV's setting "Turn on via Wi-Fi");
  *   then it puts the TV on this stick's input and asks the phone to wait with the music until the picture is up, so the first seconds
  *   are not lost.
- * - **The TV's own volume.** The TV keeps the volume it had when the phone connected until the phone's slider is moved; from then on the
- *   slider is the TV's real scale (70 % is a TV volume of 70, within the volume limits' ceiling), and the remote's volume keys step the TV
- *   from where it is (see [TvVolume]), when the TV lets it be moved; a TV that sends its sound to a fixed output does not, and then the
- *   receiver's own volume is the one that moves. The TV goes back to what it was when the session ends.
+ * - **The TV's own volume.** The TV keeps the volume it had when the phone connected, and the phone's slider and the remote's volume
+ *   keys turn it down from there and back up to it, never above (see [TvVolume]), when the TV lets it be moved; a TV that sends its
+ *   sound to a fixed output does not, and then the receiver's own volume is the one that moves. The TV goes back to what it was when
+ *   the session ends.
  * - **Music mode.** While only music plays the TV's screen goes off (the sound goes on) and comes back at the next key.
  * - **Smart pause.** The phone's music pauses when the TV is switched to another input or turned off.
  *
@@ -45,10 +45,6 @@ class LgLink(private val context: Context, private val settings: Settings) {
     /** Set by the service: called with true when the TV's volume is in charge (the output is then at full scale) and with false when it is not. */
     @Volatile
     var onTvVolumeInCharge: ((Boolean) -> Unit)? = null
-
-    /** Set by the service: called (on the worker) with the TV's volume (0 to 100) when its owner changed it with the TV's own remote during a session. */
-    @Volatile
-    var onOwnerVolume: ((Int) -> Unit)? = null
 
     /** Set by the service: called (on the worker) after Home was pressed to wake the TV, so that it can bring the player back to the front. */
     @Volatile
@@ -78,20 +74,6 @@ class LgLink(private val context: Context, private val settings: Settings) {
     @Volatile
     private var firstLevel = -1f
     private var tvLastSet = -1
-        set(value) {
-            field = value
-            tvNow = value
-        }
-
-    /** What the TV's volume is now, as far as the receiver knows (the last it set or was told): for the remote's keys to step from. */
-    @Volatile
-    private var tvNow = -1
-
-    // the phone's slider has moved from where it began (or the remote's keys were used): from then on the slider is the TV's real scale
-    private var sliderMoved = false
-
-    @Volatile
-    private var remoteTouched = false
     private var tvLastSetAt = 0L
     private var tvRestoreTo = -1 // what the TV goes back to when the session ends: its volume at the start, or what its owner set on it since
     private var musicModeBroken = false
@@ -141,8 +123,6 @@ class LgLink(private val context: Context, private val settings: Settings) {
         tvReference = -1
         tvLastSet = -1
         tvRestoreTo = -1
-        sliderMoved = false
-        remoteTouched = false
         musicModeBroken = false
         when (probe()) {
             Probe.SILENT ->
@@ -214,9 +194,8 @@ class LgLink(private val context: Context, private val settings: Settings) {
     }
 
     /** The slider (the phone's or the remote's) is at [level] (0 to 1): the TV's volume follows, when it can. */
-    fun volume(level: Float, fromRemote: Boolean = false) {
+    fun volume(level: Float) {
         if (!paired) return
-        if (fromRemote) remoteTouched = true
         if (!settings.tvVolume) {
             // switched off while the TV's volume was in charge: the receiver's own volume takes over again
             work("tv volume off") { if (tvVolumeInCharge) giveBackTvVolume() }
@@ -520,8 +499,11 @@ class LgLink(private val context: Context, private val settings: Settings) {
     private fun ceilingPercent(): Int =
         VolumeLimits.ceilingPercent(settings.volumeLimits(), Calendar.getInstance().get(Calendar.HOUR_OF_DAY))
 
-    /** The slider position that stands for the TV's volume right now, for the remote's volume keys to step from; -1 when it is not known. Any thread. */
-    fun tvSliderLevel(): Float = tvNow.let { if (it < 0) -1f else TvVolume.levelFor(it, ceilingPercent()) }
+    /** The slider position that counts as the TV's own volume: where the phone's slider stood when the session began. */
+    private fun tvHome(level: Float): Float = TvVolume.home(if (firstLevel >= 0f) firstLevel else level)
+
+    /** The part of the TV's reference volume that the slider position [level] stands for. */
+    private fun tvFraction(level: Float): Float = TvVolume.fraction(level, tvHome(level), VolumeLimits.apply(1f, ceilingPercent()))
 
     private fun applyVolume(level: Float) {
         if (tvVolumeBroken || level < 0f || !sessionOpen) return
@@ -552,11 +534,9 @@ class LgLink(private val context: Context, private val settings: Settings) {
             tvReference = start
             tvLastSet = start
             tvRestoreTo = start
-            Log.i(SERVICE, "LG the TV's volume is $start: it stays there until the phone's slider moves (from ${"%.2f".format(firstLevel)}), and then the slider is the TV's own scale (full is 100, within the ceiling)")
+            Log.i(SERVICE, "LG the TV's volume is $start: it stays there while the phone's slider stays where it began (${"%.2f".format(tvHome(level))}), and the slider turns it down from there")
         }
-        if (!sliderMoved && (remoteTouched || TvVolume.moved(level, firstLevel))) sliderMoved = true
-        // the slider is the TV's real scale once it has been moved; until then the TV stays where it was (not above the ceiling)
-        val target = if (sliderMoved) TvVolume.absolute(level, ceilingPercent()) else TvVolume.atHome(tvReference, ceilingPercent())
+        val target = TvVolume.target(tvFraction(level), tvReference)
         if (tvVolumeInCharge && target == tvLastSet) return
         val answer = if (target == tvLastSet) null else opened.request("ssap://audio/setVolume", JSONObject().put("volume", target))
         if (answer != null && !LgSession.succeeded(answer)) {
@@ -581,15 +561,15 @@ class LgLink(private val context: Context, private val settings: Settings) {
         }
     }
 
-    /** The TV says its volume (it does so after every change, ours too): a change that was not ours is the owner's, and is what the TV goes back to. */
+    /** The TV says its volume (it does so after every change, ours too): a change that was not ours moves the top of the slider along. */
     private fun onTvVolumeMessage(message: JSONObject) {
         if (!tvVolumeInCharge || tvReference <= 0) return
         val facts = LgFacts.volume(message) ?: return
         if (facts.level == tvLastSet) return
         if (SystemClock.elapsedRealtime() - tvLastSetAt < OWN_CHANGE_ECHO_MS) return
-        Log.i(SERVICE, "LG the volume was changed on the TV (now ${facts.level})")
-        onOwnerVolume?.invoke(facts.level)
-        tvReference = facts.level
+        val moved = TvVolume.referenceAfterTvChange(facts.level, tvFraction(latestLevel)) ?: return
+        Log.i(SERVICE, "LG the volume was changed on the TV (now ${facts.level}): the top of the phone's slider is now $moved")
+        tvReference = moved
         tvLastSet = facts.level
         tvRestoreTo = facts.level
         settings.tvLeftBehind = "" // the owner's own volume now: nothing is owed

@@ -2,6 +2,12 @@
 
 ## [0.2.1] - fork
 
+- **rc.24.**
+  - **The phone's volume slider is the TV's volume at connect again, scaled 0 to 100 %.** rc.21 made the slider the TV's real 0 to 100; the
+    owner preferred how it was before: set the TV's volume with its remote (say 30), connect, and the phone's whole slider is that volume
+    (full is 30, half is 15), never above it, with the TV staying where it is until the slider moves. A volume set on the TV's own remote during a
+    session moves the top of the slider along. The remote's volume keys step the slider as they did. (rc.22's push of the remote's changes to the
+    phone's slider and the new volume cue stay.)
 - **rc.23.** Everything new here is off until it is switched on, and each option is explained on the settings page (Extras, TV Features):
   - **Now Playing Glance:** a small card with the cover, title and artist for about 4 seconds when a new AirPlay song starts while another app
     is in front.
