@@ -102,10 +102,10 @@ class Settings(context: Context) {
         get() = prefs.getBoolean(KEY_TV_PANEL_DOUBLE, true)
         set(value) = prefs.edit().putBoolean(KEY_TV_PANEL_DOUBLE, value).apply()
 
-    /** What holding the Menu button does: 0 nothing, 1 the TV off and the stick asleep, 2 the quick panel, 3 the Game scene. Nothing unless chosen. */
+    /** What holding the Menu button does: 0 nothing, 1 the TV off and the stick asleep, 2 the quick panel, 3 the Game scene, 4 the glance card, 5 the mini-remote. Nothing unless chosen. */
     var tvHoldAction: Int
-        get() = prefs.getInt(KEY_TV_HOLD, 0).coerceIn(0, 3)
-        set(value) = prefs.edit().putInt(KEY_TV_HOLD, value.coerceIn(0, 3)).apply()
+        get() = prefs.getInt(KEY_TV_HOLD, 0).coerceIn(0, 5)
+        set(value) = prefs.edit().putInt(KEY_TV_HOLD, value.coerceIn(0, 5)).apply()
 
     /** Short notices over the screen (and on the TV for a sleep timer) for what the stick does to the TV: a scene, a sleep timer, a picture mode. */
     var tvNotices: Boolean
@@ -144,6 +144,78 @@ class Settings(context: Context) {
         for (id in TvScenes.IDS) edit.remove(KEY_TV_SCENE_PREFIX + id)
         edit.apply()
     }
+
+    /** A small card with the cover, title and artist when a new AirPlay song starts while another app is in front. Off unless chosen. */
+    var tvGlance: Boolean
+        get() = prefs.getBoolean(KEY_TV_GLANCE, false)
+        set(value) = prefs.edit().putBoolean(KEY_TV_GLANCE, value).apply()
+
+    /** The mini-remote: play, pause, skip and volume for the phone's music over any app (a panel row, a Menu hold, OK on the glance card). Off unless chosen. */
+    var tvMiniRemote: Boolean
+        get() = prefs.getBoolean(KEY_TV_MINI_REMOTE, false)
+        set(value) = prefs.edit().putBoolean(KEY_TV_MINI_REMOTE, value).apply()
+
+    /** The glance card (time, date, weather, what plays) that a Menu hold can show over any app. Off unless chosen. */
+    var tvGlanceInfo: Boolean
+        get() = prefs.getBoolean(KEY_TV_GLANCE_INFO, false)
+        set(value) = prefs.edit().putBoolean(KEY_TV_GLANCE_INFO, value).apply()
+
+    /** Holding Home opens a list of the last apps used. Off unless chosen: the key service then takes the Home button. */
+    var holdHome: Boolean
+        get() = prefs.getBoolean(KEY_HOLD_HOME, false)
+        set(value) = prefs.edit().putBoolean(KEY_HOLD_HOME, value).apply()
+
+    /** The last apps that were in front, most recent first, as package names separated by spaces (kept only while Hold Home is on). */
+    var recentApps: String
+        get() = prefs.getString(KEY_RECENT_APPS, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_RECENT_APPS, value).apply()
+
+    /** After dark the TV's OLED brightness is lowered, and put back in the morning. Off unless chosen: it changes the TV's picture settings. */
+    var tvOledNight: Boolean
+        get() = prefs.getBoolean(KEY_TV_OLED_NIGHT, false)
+        set(value) = prefs.edit().putBoolean(KEY_TV_OLED_NIGHT, value).apply()
+
+    var tvOledFrom: Int
+        get() = prefs.getInt(KEY_TV_OLED_FROM, 21).let { if (it in OLED_FROM_CHOICES) it else 21 }
+        set(value) = prefs.edit().putInt(KEY_TV_OLED_FROM, value).apply()
+
+    var tvOledTo: Int
+        get() = prefs.getInt(KEY_TV_OLED_TO, 7).let { if (it in OLED_TO_CHOICES) it else 7 }
+        set(value) = prefs.edit().putInt(KEY_TV_OLED_TO, value).apply()
+
+    /** The OLED brightness (percent of the TV's scale) the night sets, never raising the TV's own. */
+    var tvOledLevel: Int
+        get() = prefs.getInt(KEY_TV_OLED_LEVEL, 30).let { if (it in OLED_LEVEL_CHOICES) it else 30 }
+        set(value) = prefs.edit().putInt(KEY_TV_OLED_LEVEL, value).apply()
+
+    /** What the night changed on the TV and has not put back yet, as "setting name,value it had"; empty when nothing is owed. */
+    var tvOledRestore: String
+        get() = prefs.getString(KEY_TV_OLED_RESTORE, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_TV_OLED_RESTORE, value).apply()
+
+    /** Hours without a key or any sound after which the TV, when it shows this stick, is warned and turned off; 0 is never. */
+    var tvIdleOffHours: Int
+        get() = prefs.getInt(KEY_TV_IDLE_OFF, 0).let { if (it in IDLE_OFF_CHOICES) it else 0 }
+        set(value) = prefs.edit().putInt(KEY_TV_IDLE_OFF, if (value in IDLE_OFF_CHOICES) value else 0).apply()
+
+    /** Type on the phone: a page on the home network sends text into a text box that is in focus on the TV. Needs its own accessibility service. Off unless chosen. */
+    var phoneTyping: Boolean
+        get() = prefs.getBoolean(KEY_PHONE_TYPING, false)
+        set(value) = prefs.edit().putBoolean(KEY_PHONE_TYPING, value).apply()
+
+    /** The home screen app has switched its TV cell on: the receiver then watches the TV's input and picture mode and tells it. */
+    var launcherTvCue: Boolean
+        get() = prefs.getBoolean(KEY_LAUNCHER_TV_CUE, false)
+        set(value) = prefs.edit().putBoolean(KEY_LAUNCHER_TV_CUE, value).apply()
+
+    /** The weather line the home screen last sent ("10° Clear") and when (wall clock); for the glance card. */
+    var launcherWeather: String
+        get() = prefs.getString(KEY_LAUNCHER_WEATHER, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_LAUNCHER_WEATHER, value).apply()
+
+    var launcherWeatherAt: Long
+        get() = prefs.getLong(KEY_LAUNCHER_WEATHER_AT, 0L)
+        set(value) = prefs.edit().putLong(KEY_LAUNCHER_WEATHER_AT, value).apply()
 
     /** The LG TV's address on the local network; empty until found. */
     var lgHost: String
@@ -348,6 +420,25 @@ class Settings(context: Context) {
         const val KEY_SMART_PAUSE = "smart_pause"
         const val KEY_TV_VOLUME = "tv_volume"
         const val KEY_TV_PANEL_DOUBLE = "tv_panel_double"
+        const val KEY_TV_GLANCE = "tv_glance"
+        const val KEY_TV_MINI_REMOTE = "tv_mini_remote"
+        const val KEY_TV_GLANCE_INFO = "tv_glance_info"
+        const val KEY_HOLD_HOME = "hold_home"
+        const val KEY_RECENT_APPS = "recent_apps"
+        const val KEY_TV_OLED_NIGHT = "tv_oled_night"
+        const val KEY_TV_OLED_FROM = "tv_oled_from"
+        const val KEY_TV_OLED_TO = "tv_oled_to"
+        const val KEY_TV_OLED_LEVEL = "tv_oled_level"
+        const val KEY_TV_OLED_RESTORE = "tv_oled_restore"
+        const val KEY_TV_IDLE_OFF = "tv_idle_off_hours"
+        const val KEY_PHONE_TYPING = "phone_typing"
+        const val KEY_LAUNCHER_TV_CUE = "launcher_tv_cue"
+        const val KEY_LAUNCHER_WEATHER = "launcher_weather"
+        const val KEY_LAUNCHER_WEATHER_AT = "launcher_weather_at"
+        val OLED_FROM_CHOICES = listOf(19, 20, 21, 22, 23)
+        val OLED_TO_CHOICES = listOf(5, 6, 7, 8, 9)
+        val OLED_LEVEL_CHOICES = listOf(20, 30, 40, 50)
+        val IDLE_OFF_CHOICES = listOf(0, 2, 3, 4, 6)
         const val KEY_TV_HOLD = "tv_hold_action"
         const val KEY_TV_NOTICES = "tv_notices"
         const val KEY_TV_AUTO_PICTURE = "tv_auto_picture"

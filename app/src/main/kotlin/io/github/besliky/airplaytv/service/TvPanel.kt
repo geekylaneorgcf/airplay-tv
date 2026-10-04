@@ -33,9 +33,10 @@ import io.github.besliky.airplaytv.lg.cycle
  */
 class TvPanel(private val service: AccessibilityService) {
 
-    private enum class Kind { SETTINGS, SCENE, INPUT, PICTURE, SOUND, VOLUME, MUSIC, SCREEN, SLEEP, POWER }
+    private enum class Kind { SETTINGS, SCENE, INPUT, PICTURE, SOUND, VOLUME, REMOTE, MUSIC, SCREEN, SLEEP, POWER }
 
-    private val kinds = Kind.entries
+    /** The rows of the panel, as it was opened: the mini-remote's row only when that option is on. */
+    private var kinds: List<Kind> = Kind.entries.filter { it != Kind.REMOTE }
     private val handler = Handler(Looper.getMainLooper())
     private val settings = Settings(service)
     private var view: PanelView? = null
@@ -66,6 +67,7 @@ class TvPanel(private val service: AccessibilityService) {
         TvOps.run("panel picture") {
             val tv = control ?: return@run
             val ok = tv.setPicture(id)
+            if (ok) TvNotices.cue("Picture", TvPicture.label(id))
             TvOps.onMain { if (!ok) say("The TV did not take ${TvPicture.label(id)}") }
         }
     }
@@ -75,6 +77,7 @@ class TvPanel(private val service: AccessibilityService) {
         TvOps.run("panel sound") {
             val tv = control ?: return@run
             val ok = tv.setSound(id)
+            if (ok) TvNotices.cue("Sound", TvSound.label(id))
             TvOps.onMain { if (!ok) say("The TV did not take ${TvSound.label(id)}") }
         }
     }
@@ -91,6 +94,7 @@ class TvPanel(private val service: AccessibilityService) {
 
     fun open() {
         if (view != null) return
+        kinds = Kind.entries.filter { it != Kind.REMOTE || settings.tvMiniRemote }
         val panel = PanelView(service)
         if (!add(panel)) return
         view = panel
@@ -250,6 +254,10 @@ class TvPanel(private val service: AccessibilityService) {
                 applySound.run()
             }
             Kind.VOLUME -> Unit
+            Kind.REMOTE -> {
+                close()
+                MenuKeyService.openMiniRemote()
+            }
             Kind.MUSIC -> toggleMusicMode()
             Kind.SCREEN -> {
                 close()
@@ -313,6 +321,7 @@ class TvPanel(private val service: AccessibilityService) {
                 Kind.PICTURE -> PanelView.Item("Picture Mode", pictureId?.let { TvPicture.label(it) } ?: dash(), pictureId != null)
                 Kind.SOUND -> PanelView.Item("Sound Output", soundId?.let { TvSound.label(it) } ?: dash(), soundId != null)
                 Kind.VOLUME -> PanelView.Item("Volume", if (volume >= 0) "$volume" else dash(), volume >= 0 && !volumeFixed)
+                Kind.REMOTE -> PanelView.Item("Music Remote", "", false)
                 Kind.MUSIC -> PanelView.Item("Music Mode (Screen Off)", if (settings.musicMode) "On" else "Off", true)
                 Kind.SCREEN -> PanelView.Item("Screen Off Now", "", false)
                 Kind.SLEEP -> PanelView.Item("Sleep Timer", sleepValue(), true)

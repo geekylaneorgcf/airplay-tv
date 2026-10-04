@@ -36,6 +36,26 @@ object LauncherLink {
     const val EXTRA_COMMAND = "command"
     const val EXTRA_SEEK_TO = "seekTo"
 
+    // What the receiver tells the home screen besides the music: a short notice about the TV, the sleep timer, the volume.
+    const val ACTION_CUE = "io.github.besliky.airplaytv.action.TV_CUE"
+    const val ACTION_SLEEP = "io.github.besliky.airplaytv.action.SLEEP_TIMER"
+    const val ACTION_VOLUME = "io.github.besliky.airplaytv.action.VOLUME_CUE"
+    const val EXTRA_CUE_TITLE = "title"
+    const val EXTRA_CUE_DETAIL = "detail"
+    const val EXTRA_CUE_WARN = "warn"
+    const val EXTRA_ENDS_AT = "endsAt"
+    const val EXTRA_VOLUME_PERCENT = "percent"
+
+    // What the home screen asks of the receiver besides play, pause and skip.
+    const val ACTION_CONFIG = "io.github.besliky.airplaytv.action.LAUNCHER_CONFIG"
+    const val ACTION_TV_TILE = "io.github.besliky.airplaytv.action.TV_TILE"
+    const val ACTION_SLEEP_COMMAND = "io.github.besliky.airplaytv.action.SLEEP_COMMAND"
+    const val ACTION_OPEN_PANEL = "io.github.besliky.airplaytv.action.OPEN_PANEL"
+    const val ACTION_WEATHER = "io.github.geekylaneorgcf.tvhome.action.WEATHER"
+    const val EXTRA_TV_CUE = "tvCue"
+    const val EXTRA_SCENE = "scene"
+    const val EXTRA_WEATHER = "line"
+
     /** The cover goes as a picture this many pixels on a side. */
     private const val COVER_PX = 192
     private const val COVER_QUALITY = 82
@@ -113,11 +133,35 @@ object LauncherLink {
         send(context, next, snapshot, position, now)
     }
 
-    /** Answers a query: the current state, whether or not it changed. */
+    /** Answers a query: the current state, whether or not it changed, and the sleep timer (the home screen may not have been running when it started). */
     fun answer(context: Context) {
         val snapshot = ReceiverState.current
         val now = SystemClock.elapsedRealtime()
         send(context, stateOf(snapshot), snapshot, positionNow(snapshot, now), now)
+        sleepTimer(context, TvSleepTimer.endsAt(context))
+    }
+
+    /** A short notice about the TV for the home screen's TV cell: what changed ([title]) and what it is now ([detail]). */
+    fun cue(context: Context, title: String, detail: String = "", warn: Boolean = false) {
+        broadcast(context, Intent(ACTION_CUE).putExtra(EXTRA_CUE_TITLE, title).putExtra(EXTRA_CUE_DETAIL, detail).putExtra(EXTRA_CUE_WARN, warn))
+    }
+
+    /** When the sleep timer ends (wall clock, milliseconds), 0 when none runs: for the home screen's timer cell. */
+    fun sleepTimer(context: Context, endsAt: Long) {
+        broadcast(context, Intent(ACTION_SLEEP).putExtra(EXTRA_ENDS_AT, endsAt))
+    }
+
+    /** The volume (0 to 100, the TV's own scale while it is in charge) for the home screen's volume cue. */
+    fun volume(context: Context, percent: Int) {
+        broadcast(context, Intent(ACTION_VOLUME).putExtra(EXTRA_VOLUME_PERCENT, percent.coerceIn(0, 100)))
+    }
+
+    private fun broadcast(context: Context, intent: Intent) {
+        try {
+            context.sendBroadcast(intent.setPackage(LAUNCHER_PACKAGE))
+        } catch (_: RuntimeException) {
+            // no one to tell
+        }
     }
 
     private fun send(context: Context, state: State, snapshot: ReceiverState.Snapshot, position: Long, now: Long) {

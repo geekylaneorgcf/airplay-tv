@@ -79,6 +79,9 @@ class MainActivity : SettingsPage() {
         addRow(getString(R.string.setting_tv_features)) {
             startActivity(Intent(this, TvFeaturesActivity::class.java))
         }.navigates(true)
+        addRow(getString(R.string.setting_extras)) {
+            startActivity(Intent(this, ExtrasActivity::class.java))
+        }.navigates(true)
         addRow(getString(R.string.setting_volume)) {
             startActivity(Intent(this, VolumeActivity::class.java))
         }.navigates(true)

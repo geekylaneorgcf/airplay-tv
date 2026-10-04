@@ -27,12 +27,18 @@ object TvNotices {
         banner = null
     }
 
-    /** Shows [text] now; [onTv] also puts it on the TV's own screen. Safe from any thread. */
-    fun show(text: String, amber: Boolean = false, onTv: Boolean = false) {
+    /** Tells the home screen's TV cell what happened to the TV ([title]) and how it stands now ([detail]); the home screen decides whether to show it. */
+    fun cue(title: String, detail: String = "", warn: Boolean = false) {
+        val context = app ?: return
+        LauncherLink.cue(context, title, detail, warn)
+    }
+
+    /** Shows [text] now for [forMs]; [onTv] also puts it on the TV's own screen. Safe from any thread. */
+    fun show(text: String, amber: Boolean = false, onTv: Boolean = false, forMs: Long = 0L) {
         val context = app ?: return
         val settings = Settings(context)
         if (!settings.tvNotices) return
-        TvOps.onMain { banner?.show(text, amber) }
+        TvOps.onMain { if (forMs > 0L) banner?.show(text, amber, forMs) else banner?.show(text, amber) }
         if (onTv) {
             TvOps.run("toast") {
                 val tv = TvControl.open(settings) ?: return@run

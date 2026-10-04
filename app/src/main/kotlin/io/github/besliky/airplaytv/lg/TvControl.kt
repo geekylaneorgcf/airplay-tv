@@ -26,6 +26,14 @@ class TvControl(private val session: LgSession) : Closeable {
         /** The input in front as `HDMI_2`, or null when the TV shows something else (its own apps, a channel). */
         val inputId: String? get() = LgFacts.inputIdOf(appId)
 
+        /** What the panel and the cues call input [id] (`HDMI_2`): "HDMI 2 · PS5" when the owner named it, else "HDMI 2". */
+        fun inputName(id: String): String {
+            val number = id.replace('_', ' ')
+            val label = inputs.firstOrNull { LgFacts.inputIdOf(it.appId) == id }?.label?.trim().orEmpty()
+            val plain = label.replace(" ", "")
+            return if (label.isEmpty() || plain.equals(number.replace(" ", ""), ignoreCase = true)) number else "$number · $label"
+        }
+
         /**
          * The inputs the panel offers: those with something connected, and those the owner has named (a PlayStation that is switched off
          * is still where "Game" goes), not the empty ones that still have their factory names.
@@ -69,6 +77,36 @@ class TvControl(private val session: LgSession) : Closeable {
         val ok = luna(TvLuna.SET_SYSTEM_SETTINGS, TvPicture.writeRequest(id)) && pictureIs(id)
         if (ok) pictureViaAlert = true
         Log.i(SERVICE, "LG picture mode $id: ${if (ok) "done (through the settings service)" else "the TV did not take it"}")
+        return ok
+    }
+
+    /**
+     * The OLED brightness of the TV as (the name of the setting, its value), or null when the TV has none of the settings that
+     * [TvPicture.BRIGHTNESS_KEYS] names (a TV that is not an OLED).
+     */
+    fun readBrightness(): Pair<String, Int>? {
+        for (key in TvPicture.BRIGHTNESS_KEYS) {
+            val answer = session.request("ssap://settings/getSystemSettings", TvPicture.readKeyRequest(key), READ_MS) ?: continue
+            TvPicture.readNumber(answer, key)?.let { return key to it }
+        }
+        return null
+    }
+
+    /** Sets the number setting [key] of the picture category and checks that it took; the same two ways as [setPicture]. */
+    fun setBrightness(key: String, value: Int): Boolean {
+        val target = value.coerceIn(0, 100)
+        fun took(): Boolean {
+            Thread.sleep(SETTLE_MS)
+            val answer = session.request("ssap://settings/getSystemSettings", TvPicture.readKeyRequest(key), READ_MS) ?: return false
+            return TvPicture.readNumber(answer, key) == target
+        }
+        if (!pictureViaAlert) {
+            val answer = session.request("ssap://settings/setSystemSettings", TvPicture.writeNumberRequest(key, target), WRITE_MS)
+            if (LgSession.succeeded(answer) && took()) return true
+        }
+        val ok = luna(TvLuna.SET_SYSTEM_SETTINGS, TvPicture.writeNumberRequest(key, target)) && took()
+        if (ok) pictureViaAlert = true
+        Log.i(SERVICE, "LG $key $target: ${if (ok) "done" else "the TV did not take it"}")
         return ok
     }
 

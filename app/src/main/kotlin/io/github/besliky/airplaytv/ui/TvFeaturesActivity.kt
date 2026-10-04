@@ -34,45 +34,45 @@ class TvFeaturesActivity : SubPage() {
     private lateinit var autoModeRow: Row
 
     override fun buildRows() {
-        tvRow = addRow(getString(R.string.tv_status)) {
+        tvRow = addRow(getString(R.string.tv_status), getString(R.string.tv_status_hint)) {
             if (!TvSettings.paired(settings)) Toast.makeText(this, R.string.tv_needs_pairing, Toast.LENGTH_LONG).show()
         }
-        wakeRow = addRow(getString(R.string.tv_wake)) {
+        wakeRow = addRow(getString(R.string.tv_wake), getString(R.string.tv_wake_short)) {
             settings.tvWake = !settings.tvWake
             if (settings.tvWake) Dialogs.message(this, getString(R.string.tv_wake), getString(R.string.tv_wake_hint))
             bind()
         }
-        inputRow = addRow(getString(R.string.tv_input)) { detectInput() }
-        musicRow = addRow(getString(R.string.tv_music_mode)) {
+        inputRow = addRow(getString(R.string.tv_input), getString(R.string.tv_input_short)) { detectInput() }
+        musicRow = addRow(getString(R.string.tv_music_mode), getString(R.string.tv_music_short)) {
             settings.musicMode = !settings.musicMode
             bind()
         }
-        pauseRow = addRow(getString(R.string.tv_smart_pause)) {
+        pauseRow = addRow(getString(R.string.tv_smart_pause), getString(R.string.tv_pause_short)) {
             settings.smartPause = !settings.smartPause
             bind()
         }
-        volumeRow = addRow(getString(R.string.tv_volume)) {
+        volumeRow = addRow(getString(R.string.tv_volume), getString(R.string.tv_volume_short)) {
             settings.tvVolume = !settings.tvVolume
             bind()
         }
-        panelRow = addRow(getString(R.string.tv_panel_double)) {
+        panelRow = addRow(getString(R.string.tv_panel_double), getString(R.string.tv_panel_double_short)) {
             settings.tvPanelDoublePress = !settings.tvPanelDoublePress
             if (settings.tvPanelDoublePress) Dialogs.message(this, getString(R.string.tv_panel_double), getString(R.string.tv_panel_double_hint))
             bind()
         }
-        holdRow = addRow(getString(R.string.tv_hold)) {
+        holdRow = addRow(getString(R.string.tv_hold), getString(R.string.tv_hold_short)) {
             settings.tvHoldAction = (settings.tvHoldAction + 1) % HOLD_CHOICES
             if (settings.tvHoldAction != 0) Dialogs.message(this, getString(R.string.tv_hold), getString(R.string.tv_hold_hint))
             bind()
         }
-        addRow(getString(R.string.tv_scenes)) {
+        addRow(getString(R.string.tv_scenes), getString(R.string.tv_scenes_hint)) {
             startActivity(Intent(this, TvScenesActivity::class.java))
         }.navigates(true)
-        noticesRow = addRow(getString(R.string.tv_notices)) {
+        noticesRow = addRow(getString(R.string.tv_notices), getString(R.string.tv_notices_hint)) {
             settings.tvNotices = !settings.tvNotices
             bind()
         }
-        autoRow = addRow(getString(R.string.tv_auto_picture)) {
+        autoRow = addRow(getString(R.string.tv_auto_picture), getString(R.string.tv_auto_picture_hint)) {
             settings.tvAutoPicture = !settings.tvAutoPicture
             if (settings.tvAutoPicture) Dialogs.message(this, getString(R.string.tv_auto_picture), getString(R.string.tv_auto_picture_hint))
             bind()
@@ -85,7 +85,7 @@ class TvFeaturesActivity : SubPage() {
             settings.tvAutoPictureMode = next(TvPicture.MODES.map { it.id }, settings.tvAutoPictureMode)
             bind()
         }
-        addRow(getString(R.string.tv_forget)) {
+        addRow(getString(R.string.tv_forget), getString(R.string.tv_forget_short)) {
             settings.forgetTv()
             bind()
         }
@@ -126,6 +126,8 @@ class TvFeaturesActivity : SubPage() {
                 1 -> getString(R.string.value_hold_tv_off)
                 2 -> getString(R.string.value_hold_panel)
                 3 -> getString(R.string.value_hold_game)
+                4 -> getString(R.string.value_hold_glance)
+                5 -> getString(R.string.value_hold_remote)
                 else -> getString(R.string.value_off)
             },
         )
@@ -141,7 +143,7 @@ class TvFeaturesActivity : SubPage() {
     }
 
     private companion object {
-        const val HOLD_CHOICES = 4
+        const val HOLD_CHOICES = 6
         val AUTO_INPUTS = TvScenes.INPUT_CHOICES.filter { it.isNotEmpty() }
     }
 }

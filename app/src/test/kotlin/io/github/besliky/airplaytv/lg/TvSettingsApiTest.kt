@@ -58,6 +58,24 @@ class TvSettingsApiTest {
     }
 
     @Test
+    fun `an OLED brightness is read as a number, whatever way the TV writes it`() {
+        assertEquals(80, TvPicture.readNumber(JSONObject("""{"payload":{"settings":{"oledLight":80}}}"""), "oledLight"))
+        assertEquals(60, TvPicture.readNumber(JSONObject("""{"payload":{"settings":{"backlight":"60"}}}"""), "backlight"))
+        assertNull(TvPicture.readNumber(JSONObject("""{"payload":{"settings":{"backlight":"x"}}}"""), "backlight"))
+        assertNull(TvPicture.readNumber(JSONObject("""{"payload":{"settings":{}}}"""), "oledLight"))
+        assertNull(TvPicture.readNumber(JSONObject("""{"payload":{"returnValue":false}}"""), "oledLight"))
+        assertEquals(listOf("oledLight", "backlight"), TvPicture.BRIGHTNESS_KEYS)
+    }
+
+    @Test
+    fun `a brightness write names the setting and the number`() {
+        val request = TvPicture.writeNumberRequest("oledLight", 30)
+        assertEquals("picture", request.getString("category"))
+        assertEquals(30, request.getJSONObject("settings").getInt("oledLight"))
+        assertEquals("backlight", TvPicture.readKeyRequest("backlight").getJSONArray("keys").getString(0))
+    }
+
+    @Test
     fun `the picture write asks for the picture category`() {
         val request = TvPicture.writeRequest("game")
         assertEquals("picture", request.getString("category"))

@@ -55,7 +55,11 @@ abstract class SettingsPage : Activity() {
         hintView = findViewById(R.id.hint)
     }
 
-    protected fun addRow(title: CharSequence, onClick: (Row) -> Unit): Row {
+    /**
+     * A row of the page. With a [hint] (what the option does, in plain words) the hint shows on the left, under the title, for as long as
+     * the row has the focus.
+     */
+    protected fun addRow(title: CharSequence, hint: CharSequence? = null, onClick: (Row) -> Unit): Row {
         val view = LayoutInflater.from(this).inflate(R.layout.view_setting_row, rows, false)
         val row = Row(view).title(title)
         view.setOnClickListener { onClick(row) }
@@ -63,6 +67,10 @@ abstract class SettingsPage : Activity() {
             val scale = if (hasFocus) FOCUS_SCALE else 1f
             v.animate().scaleX(scale).scaleY(scale).setDuration(FOCUS_ANIM_MS).start()
             v.elevation = if (hasFocus) 8f else 0f
+            if (hasFocus && hint != null) {
+                hintView.text = hint
+                hintView.visibility = View.VISIBLE
+            }
         }
         rows.addView(view)
         return row

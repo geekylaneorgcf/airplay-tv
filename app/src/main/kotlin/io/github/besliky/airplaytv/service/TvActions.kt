@@ -1,14 +1,17 @@
 package io.github.besliky.airplaytv.service
 
 import android.content.Context
+import android.net.ConnectivityManager
 import android.os.SystemClock
 import io.github.besliky.airplaytv.Log
 import io.github.besliky.airplaytv.Log.Category.SERVICE
 import io.github.besliky.airplaytv.Settings
 import io.github.besliky.airplaytv.core.NativeBridge
+import io.github.besliky.airplaytv.lg.LgFacts
 import io.github.besliky.airplaytv.lg.TvControl
 import io.github.besliky.airplaytv.lg.TvPicture
 import io.github.besliky.airplaytv.lg.TvScenes
+import io.github.besliky.airplaytv.lg.Wol
 
 /**
  * What the quick panel, the Menu key's hold and the sleep timer do to the TV: apply a scene, turn the screen off, turn the TV off and let
@@ -56,6 +59,7 @@ object TvActions {
                 if (input != null && input != state.inputId && !tv.switchInput(input)) {
                     TvNotices.show("$name (the input did not change)", amber = true, onTv = true)
                 }
+                TvNotices.cue("Scene: ${TvScenes.label(id)}", TvScenes.summaryOf(scene, state, input), warn = failed.isNotEmpty())
                 Log.i(SERVICE, "TV scene $id applied${if (failed.isEmpty()) "" else ", not changed: $failed"}")
             } finally {
                 tv.close()
@@ -63,10 +67,67 @@ object TvActions {
         }
     }
 
+    /**
+     * A scene, for a TV that may be off: the TV is woken first when it is on standby or does not answer (a Home press makes the stick ask
+     * it to switch on over HDMI-CEC, and Wake-on-LAN too when its address is known), then the scene is applied. For the home screen's TV tiles.
+     */
+    fun applySceneWaking(context: Context, id: String) {
+        val app = context.applicationContext
+        val settings = Settings(app)
+        TvOps.run("scene $id with a wake") {
+            val tv = TvControl.open(settings, 1500)
+            val asleep = tv == null || LgFacts.isOnStandby(tv.readPower())
+            tv?.close()
+            if (asleep) {
+                TvNotices.show("Waking the TV…", onTv = false)
+                if (!wakeAndWait(app, settings)) {
+                    TvNotices.show("The TV did not wake", amber = true)
+                    TvNotices.cue("The TV did not wake", "", warn = true)
+                    return@run
+                }
+                Thread.sleep(WAKE_SETTLE_MS)
+            }
+            TvOps.onMain { applyScene(app, id) }
+        }
+    }
+
+    /** Presses Home and sends Wake-on-LAN, then waits (up to about 45 s) until the TV opens a connection and is not on standby. Blocking: on the TV thread. */
+    private fun wakeAndWait(app: Context, settings: Settings): Boolean {
+        val homed = MenuKeyService.pressHome()
+        val macs = settings.lgMacs.split(',').mapNotNull { Wol.parseMac(it) }
+        if (macs.isNotEmpty()) Wol.send(macs, broadcastAddresses(app))
+        if (!homed && macs.isEmpty()) {
+            Log.w(SERVICE, "TV wake: the key service is off and the TV's hardware address is not known")
+            return false
+        }
+        val started = SystemClock.elapsedRealtime()
+        var attempt = 0
+        while (SystemClock.elapsedRealtime() - started < WAKE_WAIT_MS) {
+            Thread.sleep(2000)
+            if (macs.isNotEmpty() && ++attempt % 3 == 0) Wol.send(macs, broadcastAddresses(app))
+            val tv = TvControl.open(settings, 1500) ?: continue
+            val up = !LgFacts.isOnStandby(tv.readPower())
+            tv.close()
+            if (up) return true
+        }
+        return false
+    }
+
+    @Suppress("DEPRECATION")
+    private fun broadcastAddresses(app: Context): List<ByteArray> = try {
+        val connectivity = app.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        connectivity.allNetworks.mapNotNull { connectivity.getLinkProperties(it) }
+            .flatMap { it.linkAddresses }
+            .mapNotNull { Wol.broadcastOf(it.address.address, it.prefixLength) }
+    } catch (_: RuntimeException) {
+        emptyList()
+    }
+
     /** Switches the TV to [inputId] (`HDMI_2`); [name] is what the notice calls it. */
     fun switchInput(context: Context, inputId: String, name: String) {
         val settings = Settings(context.applicationContext)
         TvNotices.show("Input: $name", onTv = true)
+        TvNotices.cue("Input", name)
         TvOps.run("switch input") {
             val tv = TvControl.open(settings)
             if (tv == null) {
@@ -168,6 +229,8 @@ object TvActions {
         }
     }
 
+    private const val WAKE_WAIT_MS = 45_000L
+    private const val WAKE_SETTLE_MS = 2_500L
     private const val COUNTDOWN_MS = 3000L
     private const val CANCEL_GRACE_MS = 400L
     private const val SLEEP_AFTER_MS = 1500L

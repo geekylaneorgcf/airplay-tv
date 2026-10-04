@@ -27,6 +27,14 @@ object TvScenes {
         else -> Scene(id, "", "", "", -1, false)
     }
 
+    /** A scene's effect in a few words for the home screen's TV cell: the input it goes to, else its picture mode. */
+    fun summaryOf(scene: Scene, state: TvControl.State, input: String?): String = when {
+        input != null -> state.inputName(input)
+        scene.picture.isNotEmpty() -> TvPicture.label(TvPicture.translate(scene.picture, state.picture))
+        scene.screenOff -> "Screen off"
+        else -> ""
+    }
+
     fun encode(scene: Scene): String =
         "${scene.input}|${scene.picture}|${scene.sound}|${scene.volume}|${if (scene.screenOff) 1 else 0}"
 

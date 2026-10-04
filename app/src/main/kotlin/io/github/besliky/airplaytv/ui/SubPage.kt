@@ -26,6 +26,7 @@ abstract class SubPage : SettingsPage() {
         nameView.visibility = View.GONE
         addressView.visibility = View.GONE
         hintView.visibility = View.GONE
+        hintView.setPadding(0, 16, 0, 0)
         buildRows()
         bind()
         rows.getChildAt(0)?.requestFocus()

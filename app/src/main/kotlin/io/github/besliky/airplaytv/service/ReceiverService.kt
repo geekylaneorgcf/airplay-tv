@@ -297,6 +297,29 @@ class ReceiverService : Service(), NativeBridge.Listener {
         audio.setVolume(gain)
         Log.i(SESSION, "volume: slider ${"%.2f".format(level)}, ceiling $ceiling%, output gain ${"%.3f".format(gain)}${if (tvVolumeInCharge) " (the TV's volume is in charge)" else ""}")
         lg.volume(level, fromRemote)
+        scheduleVolumeCue(level)
+    }
+
+    private var cueLevel = -1f
+    private var volumeCueArmed = false
+    private val volumeCue = Runnable {
+        val level = cueLevel
+        if (level < 0f) return@Runnable
+        // the TV's own scale while it is in charge, else the slider's position within the ceiling
+        val percent = if (tvVolumeInCharge) TvVolume.absolute(level, ceilingNow()) else Math.round(level * ceilingNow())
+        LauncherLink.volume(this, percent)
+    }
+
+    /** The home screen's volume cue: the last level of a burst of changes, a moment after it. */
+    private fun scheduleVolumeCue(level: Float) {
+        // the first level of a session is where the slider stands, not a change
+        if (!volumeCueArmed) {
+            volumeCueArmed = true
+            return
+        }
+        cueLevel = level
+        handler.removeCallbacks(volumeCue)
+        handler.postDelayed(volumeCue, 120L)
     }
 
     /** The limits or who is in charge of the volume changed: the same slider position, put on the speakers again. */
@@ -417,6 +440,8 @@ class ReceiverService : Service(), NativeBridge.Listener {
         lg.onOwnerVolume = { tv -> handler.post { scheduleVolumePush(TvVolume.levelFor(tv, ceilingNow())) } }
         UserKeys.listener = { lg.userKey() }
         TvAutoPicture.start(this)
+        TvSchedules.start(this)
+        VolumeBridge.listener = { keyCode -> handler.post { onVolumeKey(keyCode) } }
         lg.onHomePressed = { handler.postDelayed({ reopenScreens() }, REOPEN_AFTER_HOME_MS) }
         VideoPlayback.onScreenEnded = { handler.post { endUrlVideo(bySender = false) } }
         dacp = DacpClient(this).also { RemoteControl.client = it }
@@ -463,6 +488,8 @@ class ReceiverService : Service(), NativeBridge.Listener {
         stopVolumeWatch()
         UserKeys.listener = null
         TvAutoPicture.stop()
+        TvSchedules.stop()
+        VolumeBridge.listener = null
         VideoPlayback.onScreenEnded = null
         lg.shutdown()
         effects.release()
@@ -935,6 +962,7 @@ class ReceiverService : Service(), NativeBridge.Listener {
         startVolumeWatch()
         lg.sessionStarted()
         firstVolumeOfSession = true
+        volumeCueArmed = false
         phoneGain = -1f
         trackKey = ""
         trackHistory.clear()

@@ -23,12 +23,28 @@ object TvSleepTimer {
         if (minutes <= 0) {
             if (settings.tvSleepEndsAt != 0L) TvNotices.show("Sleep timer off")
             settings.tvSleepEndsAt = 0L
+            LauncherLink.sleepTimer(app, 0L)
             return
         }
         val end = System.currentTimeMillis() + minutes * 60_000L
         settings.tvSleepEndsAt = end
         schedule(app, end)
+        LauncherLink.sleepTimer(app, end)
         TvNotices.show("Sleep timer: the TV turns off in $minutes min")
+    }
+
+    /** Adds 15 minutes to a timer that runs (the home screen's timer cell asks for it); nothing when none runs. */
+    fun extend(context: Context) {
+        val app = context.applicationContext
+        val settings = Settings(app)
+        val end = settings.tvSleepEndsAt
+        if (end <= System.currentTimeMillis()) return
+        clear()
+        val extended = end + SleepTimerMath.EXTEND_MS
+        settings.tvSleepEndsAt = extended
+        schedule(app, extended)
+        LauncherLink.sleepTimer(app, extended)
+        TvNotices.show("Sleep timer: 15 more minutes")
     }
 
     /** After a restart of the app: carries on with a timer that was running, or drops one that ended long ago (it must not turn the TV off hours late). */
@@ -44,6 +60,7 @@ object TvSleepTimer {
         }
         clear()
         schedule(app, end)
+        LauncherLink.sleepTimer(app, end)
     }
 
     /** A key went down: in the last minute that adds time. */
@@ -57,6 +74,7 @@ object TvSleepTimer {
         val extended = end + SleepTimerMath.EXTEND_MS
         settings.tvSleepEndsAt = extended
         schedule(app, extended)
+        LauncherLink.sleepTimer(app, extended)
         TvNotices.show("Sleep timer: 15 more minutes")
     }
 
@@ -75,6 +93,7 @@ object TvSleepTimer {
                     SleepTimerMath.Stage.END -> {
                         Settings(app).tvSleepEndsAt = 0L
                         pending.clear()
+                        LauncherLink.sleepTimer(app, 0L)
                         TvActions.tvOff(app)
                     }
                 }

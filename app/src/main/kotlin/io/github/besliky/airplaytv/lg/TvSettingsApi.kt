@@ -93,6 +93,30 @@ object TvPicture {
 
     fun writeRequest(id: String): JSONObject =
         JSONObject().put("category", "picture").put("settings", JSONObject().put("pictureMode", id))
+
+    /**
+     * An OLED TV's pixel brightness is a number setting of the picture category; webOS has called it `backlight` and `oledLight`, and a
+     * TV has one of them. They are tried in this order.
+     */
+    val BRIGHTNESS_KEYS = listOf("oledLight", "backlight")
+
+    /** A read of one picture setting. */
+    fun readKeyRequest(key: String): JSONObject = JSONObject().put("category", "picture").put("keys", JSONArray().put(key))
+
+    /** The number of setting [key] in an answer of `getSystemSettings`, or null when the TV has no such setting. */
+    fun readNumber(message: JSONObject, key: String): Int? {
+        val settings = message.optJSONObject("payload")?.optJSONObject("settings") ?: return null
+        if (!settings.has(key) || settings.isNull(key)) return null
+        val value = settings.opt(key)
+        return when (value) {
+            is Number -> value.toInt()
+            is String -> value.trim().toIntOrNull()
+            else -> null
+        }
+    }
+
+    fun writeNumberRequest(key: String, value: Int): JSONObject =
+        JSONObject().put("category", "picture").put("settings", JSONObject().put(key, value))
 }
 
 object TvSound {

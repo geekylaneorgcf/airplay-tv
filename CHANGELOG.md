@@ -2,6 +2,23 @@
 
 ## [0.2.1] - fork
 
+- **rc.23.** Everything new here is off until it is switched on, and each option is explained on the settings page (Extras, TV Features):
+  - **Now Playing Glance:** a small card with the cover, title and artist for about 4 seconds when a new AirPlay song starts while another app
+    is in front.
+  - **Music Remote:** previous, play or pause, next and the volume for the phone's music over any app, from a quick panel row, a Menu hold
+    (Hold Menu now also offers Glance Card and Music Remote) or OK on the glance card.
+  - **Glance Card:** the time, date, weather (from the launcher) and what plays, for 4 seconds, from a Menu hold.
+  - **Hold Home:** holding Home lists the last five apps (the key service then also notes which app is in front); a press of Home is as before.
+  - **Night Brightness:** the TV's OLED brightness is lowered after an hour you choose and put back in the morning (only if you have not
+    changed it); never raised; it remembers what it changed across restarts.
+  - **Turn TV Off When Idle:** after 2, 3, 4 or 6 hours with nothing pressed or played, and only while the TV shows this stick, a 2-minute
+    warning (any key cancels) and the TV goes off. Never while the TV is on another input.
+  - **Type On Phone:** a link with a code on the TV's screen when a text box opens; a page on the phone types into it. Needs its own
+    accessibility service, switched on once; it works with standard Android text boxes (not YouTube's own keyboard).
+  - **For the home screen:** the receiver now tells the launcher about TV changes (input, picture mode, scenes), the sleep timer and the
+    volume, and takes its requests (a TV tile that wakes the TV and applies a scene, adding time to or ending the sleep timer, opening the
+    panel, the weather line).
+  - The settings pages explain each option on the left while its row has the focus.
 - **rc.22.**
   - **An experiment: the phone's slider follows the volume changed with a remote.** Classic AirPlay has no "volume changed" message to the
     phone (AirPlay 2 has). When the volume is changed with the stick's remote keys or with the LG remote during a session, the receiver now
