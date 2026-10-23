@@ -2,6 +2,7 @@
 
 ## [0.2.1] - fork
 
+- **rc.26.** A command `off` for the receiver's sleep-command broadcast (`am broadcast -a io.github.besliky.airplaytv.action.SLEEP_COMMAND --es command off`): the LG TV goes to standby and the stick sleeps, as the held Menu button does. Nothing changes unless it is sent.
 - **rc.25.**
   - **The Menu button is left alone in the system's settings.** In the Fire TV settings (a Bluetooth device's menu to forget it, for
     instance) the button now does what the system built it for; everywhere else it still opens the LG TV's menu. The service now notes which
