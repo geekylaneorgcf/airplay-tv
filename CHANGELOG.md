@@ -2,6 +2,10 @@
 
 ## [0.2.1] - fork
 
+- **rc.25.**
+  - **The Menu button is left alone in the system's settings.** In the Fire TV settings (a Bluetooth device's menu to forget it, for
+    instance) the button now does what the system built it for; everywhere else it still opens the LG TV's menu. The service now notes which
+    app is in front (the package name only, nothing is read from the screen).
 - **rc.24.**
   - **The phone's volume slider is the TV's volume at connect again, scaled 0 to 100 %.** rc.21 made the slider the TV's real 0 to 100; the
     owner preferred how it was before: set the TV's volume with its remote (say 30), connect, and the phone's whole slider is that volume

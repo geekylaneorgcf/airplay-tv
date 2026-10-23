@@ -46,6 +46,7 @@ class MenuKeyService : AccessibilityService() {
 
     // Hold Home: the app in front, the last apps, and the short time after the service itself pressed Home in which the key is let through
     private var frontPackage: String? = null
+    private var windowPackage: String? = null
     private var recents: List<String> = emptyList()
     private var passHomeUntil = 0L
     private var lastSongKey = ""
@@ -149,21 +150,23 @@ class MenuKeyService : AccessibilityService() {
     }
 
     /**
-     * The service listens to events only while Hold Home is on, and then only to which window has come to the front, to keep the list of
-     * the last apps (no screen content). With it off it listens to none.
+     * The service listens only to which window has come to the front (no screen content, only the package name): to leave the Menu button to
+     * the system's settings screens, and, with Hold Home on, to keep the list of the last apps.
      */
     private fun applyEventTypes() {
         val info = serviceInfo ?: return
-        val wanted = if (settings.holdHome) AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED else 0
+        val wanted = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
         if (info.eventTypes == wanted) return
         info.eventTypes = wanted
         serviceInfo = info
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (event == null || event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || !settings.holdHome) return
+        if (event == null || event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val pkg = event.packageName?.toString()
-        if (!RecentApps.counts(pkg, packageName)) return
+        // which package is in front, for MenuScope (the system's settings keep their own Menu button); only the name is kept, in memory
+        if (!pkg.isNullOrEmpty() && pkg != packageName) windowPackage = pkg
+        if (!settings.holdHome || !RecentApps.counts(pkg, packageName)) return
         if (pkg == frontPackage) return
         frontPackage = pkg
         recents = RecentApps.add(recents, pkg!!)
@@ -190,6 +193,7 @@ class MenuKeyService : AccessibilityService() {
         // Menu: a press opens the TV's own menu, a double press the quick panel, a hold what the owner chose (see MenuGesture).
         if (event.keyCode == KeyEvent.KEYCODE_MENU) {
             if (!settings.tvMenuButton) return false
+            if (panel?.isOpen != true && !TvMenuMode.isActive && MenuScope.leaveToApp(windowPackage)) return false // the system's settings use Menu themselves
             if (event.action == KeyEvent.ACTION_DOWN) gesture.onDown(event.repeatCount) else if (event.action == KeyEvent.ACTION_UP) gesture.onUp()
             return true // the press and its release belong to the TV now
         }
