@@ -278,7 +278,10 @@ class MenuKeyService : AccessibilityService() {
                 return true
             }
             KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_VOLUME_DOWN -> {
-                if (press) display.unmute()
+                if (press) {
+                    display.noteKey(if (code == KeyEvent.KEYCODE_VOLUME_UP) "volume up" else "volume down")
+                    display.unmute()
+                }
                 return false // the system moves its volume, the display follows
             }
             KeyEvent.KEYCODE_MENU -> {

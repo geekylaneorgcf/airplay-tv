@@ -2,6 +2,9 @@
 
 ## [0.2.1] - fork
 
+- **rc.28.** Monitor mode: the loudness no longer moves by itself (as it likely did from the volume effect's own compressor and
+  limiter, and from writing its gain again each second): the effect is now a plain gain, written only when it changes. The event log
+  also notes the volume keys.
 - **rc.27.** **Display Is A Monitor** (TV Features, off until switched on), for a screen that takes no volume or power from the stick:
   the remote's volume keys change the loudness with a bar at the side (3 dB a step), Mute mutes and twice quickly puts the stick to
   sleep, and the Menu button opens a panel with volume, mute, brightness and night warmth (drawn over the picture, not the monitor's

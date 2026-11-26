@@ -2,6 +2,7 @@ package io.github.besliky.airplaytv.service
 
 import android.accessibilityservice.AccessibilityService
 import android.annotation.SuppressLint
+import android.annotation.TargetApi
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -54,6 +55,7 @@ class MonitorDisplay(private val service: AccessibilityService) {
 
     private val effects = HashMap<Int, DynamicsProcessing>() // worker only
     private var lastIndex = -1 // worker only
+    private val applied = HashMap<Int, Float>() // worker only: the gain each effect was last given
 
     @Volatile
     var muted = false
@@ -147,6 +149,11 @@ class MonitorDisplay(private val service: AccessibilityService) {
         if (muted) toggleMute()
     }
 
+    /** Notes a press of the remote's keys, so that the log tells them from a volume that moved by itself. */
+    fun noteKey(name: String) {
+        worker.post { event("key $name") }
+    }
+
     fun stepVolume(step: Int) {
         muted = false
         audio.adjustStreamVolume(
@@ -199,14 +206,17 @@ class MonitorDisplay(private val service: AccessibilityService) {
             for (session in live) {
                 val effect = effects[session]
                 try {
-                    if (effect != null) {
-                        effect.setInputGainAllChannelsTo(db)
-                    } else {
-                        val made = DynamicsProcessing(0, session, null)
+                    if (effect == null) {
+                        val made = gainOnly(session)
                         made.setInputGainAllChannelsTo(db)
                         made.setEnabled(true)
                         effects[session] = made
+                        applied[session] = db
                         event("attached to session $session at $db dB")
+                    } else if (applied[session] != db) {
+                        // written only when it changes: a write each second can be heard
+                        effect.setInputGainAllChannelsTo(db)
+                        applied[session] = db
                     }
                 } catch (e: RuntimeException) {
                     event("session $session did not take the gain: $e")
@@ -216,6 +226,18 @@ class MonitorDisplay(private val service: AccessibilityService) {
         } catch (e: Exception) {
             Log.w(SERVICE, "monitor volume update failed", e)
         }
+    }
+
+    /**
+     * The effect with every stage but the input gain left out. Its default set-up also has two equalisers, a multiband compressor
+     * and a limiter, which move the loudness with the programme.
+     */
+    @TargetApi(Build.VERSION_CODES.P)
+    private fun gainOnly(session: Int): DynamicsProcessing {
+        val config = DynamicsProcessing.Config.Builder(
+            DynamicsProcessing.VARIANT_FAVOR_FREQUENCY_RESOLUTION, CHANNELS, false, 0, false, 0, false, 0, false,
+        ).build()
+        return DynamicsProcessing(0, session, config)
     }
 
     private fun readSessions(): Set<Int>? {
@@ -228,6 +250,7 @@ class MonitorDisplay(private val service: AccessibilityService) {
     }
 
     private fun release(session: Int) {
+        applied.remove(session)
         val effect = effects.remove(session) ?: return
         try {
             effect.setEnabled(false)
@@ -379,6 +402,7 @@ class MonitorDisplay(private val service: AccessibilityService) {
         const val VOLUME_CHANGED = "android.media.VOLUME_CHANGED_ACTION"
         const val EXTRA_STREAM_TYPE = "android.media.EXTRA_VOLUME_STREAM_TYPE"
         const val POLL_MS = 1000L
+        const val CHANNELS = 2
         const val SHOW_MS = 1800L
         const val LOG_LIMIT = 200_000L
         const val BAR_WIDTH_DP = 48
