@@ -92,6 +92,24 @@ class Settings(context: Context) {
         get() = prefs.getBoolean(KEY_RETURN, true)
         set(value) = prefs.edit().putBoolean(KEY_RETURN, value).apply()
 
+    /**
+     * The screen is a monitor the stick cannot talk to (no CEC, IR or network): the volume, mute, brightness and sleep are done
+     * on the stick (see [io.github.besliky.airplaytv.service.MonitorDisplay]) and every LG TV feature stands still.
+     */
+    var monitorMode: Boolean
+        get() = prefs.getBoolean(KEY_MONITOR, false)
+        set(value) = prefs.edit().putBoolean(KEY_MONITOR, value).apply()
+
+    /** Monitor mode's software brightness, 0 to 10 (10 draws nothing). */
+    var monitorBrightness: Int
+        get() = prefs.getInt(KEY_MONITOR_BRIGHTNESS, 10).coerceIn(0, 10)
+        set(value) = prefs.edit().putInt(KEY_MONITOR_BRIGHTNESS, value.coerceIn(0, 10)).apply()
+
+    /** Monitor mode's night warmth, 0 (off) to 5. */
+    var monitorWarmth: Int
+        get() = prefs.getInt(KEY_MONITOR_WARMTH, 0).coerceIn(0, 5)
+        set(value) = prefs.edit().putInt(KEY_MONITOR_WARMTH, value.coerceIn(0, 5)).apply()
+
     /** The remote's Menu button opens the quick settings of an LG TV (picture mode, sound output, ...). */
     var tvMenuButton: Boolean
         get() = prefs.getBoolean(KEY_TV_MENU, false)
@@ -424,6 +442,9 @@ class Settings(context: Context) {
         const val KEY_TV_MINI_REMOTE = "tv_mini_remote"
         const val KEY_TV_GLANCE_INFO = "tv_glance_info"
         const val KEY_HOLD_HOME = "hold_home"
+        const val KEY_MONITOR = "monitor_mode"
+        private const val KEY_MONITOR_BRIGHTNESS = "monitor_brightness"
+        private const val KEY_MONITOR_WARMTH = "monitor_warmth"
         const val KEY_RECENT_APPS = "recent_apps"
         const val KEY_TV_OLED_NIGHT = "tv_oled_night"
         const val KEY_TV_OLED_FROM = "tv_oled_from"

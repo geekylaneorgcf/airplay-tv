@@ -27,7 +27,10 @@ class LauncherActionReceiver : BroadcastReceiver() {
                 "extend" -> TvSleepTimer.extend(app)
                 "cancel" -> TvSleepTimer.start(app, 0)
                 // the TV goes to standby and the stick sleeps, as the held Menu button does (only for a TV that is paired)
-                "off" -> if (TvSettings.paired(settings)) TvActions.tvOff(app)
+                "off" -> if (settings.monitorMode || TvSettings.paired(settings)) TvActions.tvOff(app)
+                // the same switch as TV Features > Display Is A Monitor
+                "monitor_on" -> settings.monitorMode = true
+                "monitor_off" -> settings.monitorMode = false
             }
             LauncherLink.ACTION_OPEN_PANEL -> MenuKeyService.openPanel()
             LauncherLink.ACTION_WEATHER -> {

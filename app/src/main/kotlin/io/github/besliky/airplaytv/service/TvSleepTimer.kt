@@ -30,7 +30,7 @@ object TvSleepTimer {
         settings.tvSleepEndsAt = end
         schedule(app, end)
         LauncherLink.sleepTimer(app, end)
-        TvNotices.show("Sleep timer: the TV turns off in $minutes min")
+        TvNotices.show("Sleep timer: ${what(app)} in $minutes min")
     }
 
     /** Adds 15 minutes to a timer that runs (the home screen's timer cell asks for it); nothing when none runs. */
@@ -78,6 +78,8 @@ object TvSleepTimer {
         TvNotices.show("Sleep timer: 15 more minutes")
     }
 
+    private fun what(app: Context) = if (Settings(app).monitorMode) "the stick sleeps" else "the TV turns off"
+
     private fun clear() {
         for (step in pending) TvOps.cancel(step)
         pending.clear()
@@ -88,8 +90,8 @@ object TvSleepTimer {
         for (step in SleepTimerMath.steps(now, end)) {
             val run = Runnable {
                 when (step.stage) {
-                    SleepTimerMath.Stage.FIVE_MINUTES -> TvNotices.show("The TV turns off in 5 minutes", amber = true, onTv = true)
-                    SleepTimerMath.Stage.ONE_MINUTE -> TvNotices.show("The TV turns off in 1 minute · any key adds 15 minutes", amber = true, onTv = true)
+                    SleepTimerMath.Stage.FIVE_MINUTES -> TvNotices.show("${what(app).replaceFirstChar { it.uppercase() }} in 5 minutes", amber = true, onTv = true)
+                    SleepTimerMath.Stage.ONE_MINUTE -> TvNotices.show("${what(app).replaceFirstChar { it.uppercase() }} in 1 minute · any key adds 15 minutes", amber = true, onTv = true)
                     SleepTimerMath.Stage.END -> {
                         Settings(app).tvSleepEndsAt = 0L
                         pending.clear()

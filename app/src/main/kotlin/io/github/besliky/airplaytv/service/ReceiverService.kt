@@ -129,6 +129,8 @@ class ReceiverService : Service(), NativeBridge.Listener {
         val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         handler.removeCallbacks(volumeWatch)
         takeVolumeKeys(false)
+        // Monitor mode: the system volume is the owner's (MonitorDisplay turns every stream down by it), so it is never moved.
+        if (settings.monitorMode) return
         try {
             savedStreamIndex = am.getStreamVolume(AudioManager.STREAM_MUSIC)
             if (am.isStreamMute(AudioManager.STREAM_MUSIC)) {

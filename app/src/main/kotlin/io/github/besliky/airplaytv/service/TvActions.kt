@@ -196,6 +196,11 @@ object TvActions {
                 Log.w(SERVICE, "TV off: the phone was not let go", e)
             }
         }
+        // a monitor cannot be told anything: sleeping the stick takes its signal away and it goes to standby
+        if (settings.monitorMode) {
+            TvOps.onMainDelayed(SLEEP_AFTER_MS, Runnable { MenuKeyService.sleepNow() })
+            return
+        }
         TvOps.run("tv off") {
             val tv = TvControl.open(settings)
             if (tv == null) {

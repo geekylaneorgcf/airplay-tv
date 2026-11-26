@@ -12,10 +12,11 @@ object TvSettings {
 
     /** The TV has been paired (it gave a key, its certificate is pinned and its address is known), whether or not the Menu button uses it. */
     fun paired(settings: Settings): Boolean =
-        settings.lgClientKey.isNotEmpty() && settings.lgCertificate.isNotEmpty() && settings.lgHost.isNotEmpty()
+        !settings.monitorMode &&
+            settings.lgClientKey.isNotEmpty() && settings.lgCertificate.isNotEmpty() && settings.lgHost.isNotEmpty()
 
     fun state(settings: Settings): State = when {
-        !settings.tvMenuButton -> State.OFF
+        settings.monitorMode || !settings.tvMenuButton -> State.OFF
         settings.lgClientKey.isEmpty() || settings.lgCertificate.isEmpty() -> State.NEEDS_SETUP
         else -> State.READY
     }

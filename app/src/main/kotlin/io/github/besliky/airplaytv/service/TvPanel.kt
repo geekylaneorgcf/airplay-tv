@@ -376,7 +376,7 @@ class TvPanel(private val service: AccessibilityService) {
     }
 
     /** The panel itself: a dark rounded card with the status line above a list of rows, the one in focus on a lighter pill. */
-    private class PanelView(context: Context) : View(context) {
+    internal class PanelView(context: Context) : View(context) {
 
         class Item(val label: String, val value: String, val arrows: Boolean, val danger: Boolean = false)
 

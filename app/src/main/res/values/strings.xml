@@ -145,6 +145,9 @@
     <string name="tv_pairing_declined">The TV did not accept this device. Run the setup again and accept the request on the TV.</string>
     <string name="tv_pairing_unreachable">Could not reach the TV at %1$s. Is it on, and on the same network?</string>
     <string name="tv_pairing_failed">The TV did not answer as expected.</string>
+    <string name="monitor_mode">Display Is A Monitor</string>
+    <string name="monitor_mode_short">Volume, brightness and sleep from the remote</string>
+    <string name="monitor_mode_hint">For a monitor with no TV controls. The Menu button opens a panel with volume, mute, brightness, night warmth, screen off and sleep. Mute twice puts the stick to sleep. LG TV features stand still. Needs the key service, and for volume one command from a computer: adb shell pm grant io.github.besliky.airplaytv android.permission.DUMP</string>
     <string name="menu_service_label" translatable="false">AirPlay TV menu button</string>
     <string name="menu_service_description">Lets the Menu button open the TV’s quick settings in every app, and lets AirPlay TV turn the screen off a few minutes after the music stops. It looks at the Menu key and at which app is in front (its name only); it does not read the screen or see what you do.</string>
     <string name="menu_setup_title">Menu button in every app</string>

@@ -20,6 +20,7 @@ class TvFeaturesActivity : SubPage() {
     private val worker = Executors.newSingleThreadExecutor { Thread(it, "lg-setup").apply { isDaemon = true } }
     private val main = Handler(Looper.getMainLooper())
 
+    private lateinit var monitorRow: Row
     private lateinit var tvRow: Row
     private lateinit var wakeRow: Row
     private lateinit var inputRow: Row
@@ -34,6 +35,11 @@ class TvFeaturesActivity : SubPage() {
     private lateinit var autoModeRow: Row
 
     override fun buildRows() {
+        monitorRow = addRow(getString(R.string.monitor_mode), getString(R.string.monitor_mode_short)) {
+            settings.monitorMode = !settings.monitorMode
+            if (settings.monitorMode) Dialogs.message(this, getString(R.string.monitor_mode), getString(R.string.monitor_mode_hint))
+            bind()
+        }
         tvRow = addRow(getString(R.string.tv_status), getString(R.string.tv_status_hint)) {
             if (!TvSettings.paired(settings)) Toast.makeText(this, R.string.tv_needs_pairing, Toast.LENGTH_LONG).show()
         }
@@ -113,6 +119,7 @@ class TvFeaturesActivity : SubPage() {
     }
 
     override fun bind() {
+        monitorRow.value(onOff(settings.monitorMode))
         val paired = TvSettings.paired(settings)
         tvRow.value(getString(if (paired) R.string.value_tv_paired else R.string.value_tv_not_paired))
         wakeRow.value(onOff(settings.tvWake))

@@ -51,6 +51,12 @@ class MenuKeyService : AccessibilityService() {
     private var passHomeUntil = 0L
     private var lastSongKey = ""
 
+    // Monitor mode (see [MonitorDisplay]): on only while the setting is
+    private var monitor: MonitorDisplay? = null
+    private var monitorPanel: MonitorPanel? = null
+    private var lastMuteAt = 0L
+    private var swallowUp = 0
+
     /** Tells a press of Home from a hold of it (Hold Home only); a press goes on to the system as Home, a hold opens the switcher. */
     private val homeGesture = MenuGesture(
         post = { delayMs, run -> main.postDelayed(run, delayMs) },
@@ -63,6 +69,7 @@ class MenuKeyService : AccessibilityService() {
 
     private val settingsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == Settings.KEY_HOLD_HOME) applyEventTypes()
+        if (key == Settings.KEY_MONITOR) main.post { applyMonitorMode() }
     }
 
     /** Tells a single press of the Menu key from a double press and a hold, see [MenuGesture]. */
@@ -124,6 +131,7 @@ class MenuKeyService : AccessibilityService() {
         recents = RecentApps.parse(settings.recentApps)
         applyEventTypes()
         settings.registerListener(settingsListener)
+        applyMonitorMode()
         ReceiverState.observe(volumeListener)
         ReceiverState.observe(songListener)
     }
@@ -133,6 +141,7 @@ class MenuKeyService : AccessibilityService() {
         ReceiverState.remove(volumeListener)
         ReceiverState.remove(songListener)
         settings.unregisterListener(settingsListener)
+        stopMonitor()
         overlay?.remove()
         overlay = null
         panel?.close()
@@ -182,6 +191,7 @@ class MenuKeyService : AccessibilityService() {
             TvActions.onAnyKey()
             TvSleepTimer.onKey(this)
         }
+        if (monitor != null) onMonitorKey(event)?.let { return it }
         // The volume keys, while the receiver has asked for them (the TV owns the volume); otherwise they go on to the system.
         if (VolumeKeys.onKey(event.keyCode, event.action)) return true
         // Home, only with Hold Home on: a press goes on as Home, a hold opens the list of the last apps.
@@ -211,6 +221,80 @@ class MenuKeyService : AccessibilityService() {
         if (panel?.isOpen == true) return panel?.onKey(event) == true
         if (!TvMenuMode.isActive) return false
         return TvMenuMode.onKey(this, event)
+    }
+
+    private fun applyMonitorMode() {
+        if (instance !== this) return
+        if (!settings.monitorMode) {
+            stopMonitor()
+            return
+        }
+        if (monitor != null) return
+        panel?.close()
+        val display = MonitorDisplay(this)
+        display.start()
+        monitor = display
+        monitorPanel = MonitorPanel(this, display)
+    }
+
+    private fun stopMonitor() {
+        monitorPanel?.close()
+        monitorPanel = null
+        monitor?.stop()
+        monitor = null
+    }
+
+    /**
+     * Monitor mode's keys: Menu opens its panel, Mute mutes (twice quickly: the stick sleeps), a blanked screen comes back at
+     * any key. Null when the key is not monitor mode's and goes on as usual.
+     */
+    private fun onMonitorKey(event: KeyEvent): Boolean? {
+        val display = monitor ?: return null
+        val sheet = monitorPanel ?: return null
+        val code = event.keyCode
+        val press = event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0
+        if (code == swallowUp && event.action == KeyEvent.ACTION_UP) {
+            swallowUp = 0
+            return true
+        }
+        if (display.blanked && press) {
+            display.blank(false)
+            swallowUp = code
+            return true
+        }
+        when (code) {
+            KeyEvent.KEYCODE_VOLUME_MUTE -> {
+                if (press) {
+                    val now = SystemClock.elapsedRealtime()
+                    if (lastMuteAt != 0L && now - lastMuteAt <= MUTE_DOUBLE_MS) {
+                        lastMuteAt = 0L
+                        display.toggleMute() // undo the first press, so the mute is as it was
+                        sleepNow()
+                    } else {
+                        lastMuteAt = now
+                        display.toggleMute()
+                    }
+                }
+                return true
+            }
+            KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_VOLUME_DOWN -> {
+                if (press) display.unmute()
+                return false // the system moves its volume, the display follows
+            }
+            KeyEvent.KEYCODE_MENU -> {
+                if (!sheet.isOpen && MenuScope.leaveToApp(windowPackage)) return false
+                if (press) {
+                    if (sheet.isOpen) {
+                        sheet.close()
+                    } else {
+                        closeCards()
+                        sheet.open()
+                    }
+                }
+                return true
+            }
+        }
+        return if (sheet.isOpen && sheet.onKey(event)) true else null
     }
 
     private fun closeCards() {
@@ -315,7 +399,8 @@ class MenuKeyService : AccessibilityService() {
     }
 
     private fun openPanel() {
-        if (readyForTv()) panel?.open()
+        val sheet = monitorPanel
+        if (sheet != null) sheet.open() else if (readyForTv()) panel?.open()
     }
 
     companion object {
@@ -327,6 +412,7 @@ class MenuKeyService : AccessibilityService() {
         private const val HOLD_REMOTE = 5
         private const val PASS_HOME_MS = 800L
         private const val SONG_CARD_DELAY_MS = 700L
+        private const val MUTE_DOUBLE_MS = 700L
         private const val WEATHER_FRESH_MS = 3 * 3_600_000L
 
         @Volatile

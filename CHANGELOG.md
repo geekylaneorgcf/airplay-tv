@@ -2,6 +2,12 @@
 
 ## [0.2.1] - fork
 
+- **rc.27.** **Display Is A Monitor** (TV Features, off until switched on), for a screen that takes no volume or power from the stick:
+  the remote's volume keys change the loudness with a bar at the side (3 dB a step), Mute mutes and twice quickly puts the stick to
+  sleep, and the Menu button opens a panel with volume, mute, brightness and night warmth (drawn over the picture, not the monitor's
+  own settings), screen off with the sound going on, a sleep timer, sleep now and the Fire TV settings. LG TV features stand still
+  and the pairing is kept. The volume needs one command from a computer:
+  `adb shell pm grant io.github.besliky.airplaytv android.permission.DUMP`.
 - **rc.26.** A command `off` for the receiver's sleep-command broadcast (`am broadcast -a io.github.besliky.airplaytv.action.SLEEP_COMMAND --es command off`): the LG TV goes to standby and the stick sleeps, as the held Menu button does. Nothing changes unless it is sent.
 - **rc.25.**
   - **The Menu button is left alone in the system's settings.** In the Fire TV settings (a Bluetooth device's menu to forget it, for
